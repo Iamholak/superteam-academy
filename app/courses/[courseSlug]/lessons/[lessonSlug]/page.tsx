@@ -16,10 +16,10 @@ export default async function LessonPage({ params }: LessonPageProps) {
   const course = await courseService.getCourseBySlug(courseSlug);
   if (!course) notFound();
 
-  const lesson = await courseService.getLessonBySlug(courseSlug, lessonSlug);
+  const lessons = await courseService.getCourseLessons(course.id);
+  const lesson = lessons.find(l => l.id === lessonSlug);
   if (!lesson) notFound();
 
-  const lessons = await courseService.getCourseLessons(course.id);
   const currentIndex = lessons.findIndex(l => l.id === lesson.id);
   const prevLesson = currentIndex > 0 ? lessons[currentIndex - 1] : null;
   const nextLesson = currentIndex < lessons.length - 1 ? lessons[currentIndex + 1] : null;
