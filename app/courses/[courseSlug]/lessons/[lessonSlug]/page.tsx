@@ -47,7 +47,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
         <div className="lg:col-span-3 space-y-6">
           <div>
             <div className="mb-4 flex items-center gap-3">
-              <Badge>{lesson.content_type}</Badge>
+              <Badge className="capitalize">{lesson.lesson_type}</Badge>
               {lesson.xp_reward > 0 && (
                 <Badge variant="outline">{lesson.xp_reward} XP</Badge>
               )}
@@ -59,15 +59,15 @@ export default async function LessonPage({ params }: LessonPageProps) {
           {/* Lesson Content */}
           <Card>
             <CardContent className="prose prose-neutral dark:prose-invert max-w-none p-8">
-              {lesson.content_type === 'video' ? (
+              {lesson.lesson_type === 'video' ? (
                 <div className="aspect-video rounded-lg bg-muted flex items-center justify-center">
                   <p className="text-muted-foreground">Video player placeholder</p>
                 </div>
-              ) : lesson.content_type === 'interactive' ? (
+              ) : lesson.lesson_type === 'coding' ? (
                 <div className="rounded-lg border border-border p-8 bg-muted/50">
                   <p className="text-muted-foreground">Interactive code editor placeholder</p>
                 </div>
-              ) : lesson.content_type === 'quiz' ? (
+              ) : lesson.lesson_type === 'quiz' ? (
                 <div className="rounded-lg border border-border p-8">
                   <p className="text-muted-foreground">Quiz component placeholder</p>
                 </div>
