@@ -10,6 +10,8 @@ export interface User {
   updated_at: string
 }
 
+export type Profile = User
+
 export interface UserProfile extends User {
   xp: number
   level: number
@@ -18,6 +20,18 @@ export interface UserProfile extends User {
   badges: Badge[]
   completedCourses: number
   enrolledCourses: number
+}
+
+export interface UserProgress {
+  id: string
+  user_id: string
+  total_xp: number
+  level: number
+  current_streak: number
+  longest_streak: number
+  last_activity_date?: string
+  created_at: string
+  updated_at: string
 }
 
 export interface Course {
@@ -126,6 +140,14 @@ export interface UserBadge {
   badge?: Badge
   earned_at: string
   transaction_signature?: string
+}
+
+export interface UserAchievement {
+  id: string
+  user_id: string
+  achievement_id: string
+  achievement?: Achievement
+  earned_at: string
 }
 
 export interface Credential {
