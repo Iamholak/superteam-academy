@@ -11,7 +11,7 @@ export class SanityService {
       console.warn('[v0] Sanity not configured: NEXT_PUBLIC_SANITY_PROJECT_ID/NEXT_PUBLIC_SANITY_DATASET missing');
       return [];
     }
-    const query = `*[_type == "course"] {
+    const query = `*[_type == "course"]{
       _id,
       title,
       "slug": slug.current,
@@ -19,9 +19,8 @@ export class SanityService {
       "thumbnail_url": thumbnail.asset->url,
       difficulty,
       category,
-      xp_reward,
-      "duration_minutes": duration,
-      published
+      "duration_minutes": coalesce(estimatedHours,0)*60,
+      "published": coalesce(isPublished,false)
     }`;
     return await sanityClient.fetch(query);
   }
@@ -35,7 +34,7 @@ export class SanityService {
       console.warn('[v0] Sanity not configured: NEXT_PUBLIC_SANITY_PROJECT_ID/NEXT_PUBLIC_SANITY_DATASET missing');
       return null;
     }
-    const query = `*[_type == "course" && slug.current == $slug][0] {
+    const query = `*[_type == "course" && slug.current == $slug][0]{
       _id,
       title,
       "slug": slug.current,
@@ -44,17 +43,17 @@ export class SanityService {
       "thumbnail_url": thumbnail.asset->url,
       difficulty,
       category,
-      xp_reward,
-      "duration_minutes": duration,
-      lessons[]-> {
+      "duration_minutes": coalesce(estimatedHours,0)*60,
+      "published": coalesce(isPublished,false),
+      lessons[]->{
         _id,
         title,
         description,
-        content,
-        lesson_type,
-        duration_minutes,
-        xp_reward,
-        "video_url": video.url
+        "lesson_type": select(contentType=="article"=>"reading", contentType=="interactive"=>"coding", contentType),
+        "duration_minutes": coalesce(estimatedMinutes,0),
+        "xp_reward": coalesce(xpReward,50),
+        "video_url": videoUrl,
+        "slug": slug.current
       }
     }`;
     return await sanityClient.fetch(query, { slug });

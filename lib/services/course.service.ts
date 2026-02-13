@@ -4,6 +4,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import type { Course, Lesson, Enrollment, LessonCompletion } from '@/lib/types';
+import { sanityService } from './sanity.service';
 
 export class CourseService {
   /**
@@ -37,50 +38,39 @@ export class CourseService {
     const { data, error } = await query;
 
     if (error || !data || data.length === 0) {
-      // Database not configured or empty - serving mock data
+      const sanityCourses = await sanityService.getCourses();
+      if (sanityCourses && sanityCourses.length > 0) {
+        return sanityCourses.map((c: any) => ({
+          id: c._id,
+          slug: c.slug,
+          title: c.title,
+          description: c.description,
+          thumbnail_url: c.thumbnail_url,
+          difficulty: c.difficulty,
+          duration_minutes: c.duration_minutes ?? 0,
+          xp_reward: c.xp_reward ?? 500,
+          category: c.category ?? 'web3',
+          instructor_id: 'sanity',
+          published: c.published ?? true,
+          order: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })) as Course[];
+      }
+      // Database & Sanity not available - return mock
       return [
         {
           id: '1',
           slug: 'solana-fundamentals',
           title: 'Solana Fundamentals',
           description: 'Start from scratch and understand the Solana blockchain inside out.',
-          category: 'development',
+          category: 'web3',
           difficulty: 'beginner',
           duration_minutes: 120,
           xp_reward: 500,
           published: true,
           instructor_id: 'mock-instructor',
           order: 0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          id: '2',
-          slug: 'defi-developer',
-          title: 'DeFi Developer',
-          description: 'Master DeFi protocols and build your own decentralized finance applications.',
-          category: 'defi',
-          difficulty: 'intermediate',
-          duration_minutes: 1800,
-          xp_reward: 1200,
-          published: true,
-          instructor_id: 'mock-instructor',
-          order: 1,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          id: '3',
-          slug: 'security-auditor',
-          title: 'Security Auditor',
-          description: 'Become a Solana security expert. Find bugs, write audits, protect protocols.',
-          category: 'security',
-          difficulty: 'advanced',
-          duration_minutes: 1620,
-          xp_reward: 2000,
-          published: true,
-          instructor_id: 'mock-instructor',
-          order: 2,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }
@@ -109,8 +99,26 @@ export class CourseService {
       .single();
 
     if (error || !data) {
-      console.warn('[v0] Error fetching course:', (error as any)?.message ?? error);
-      // Fallback to mock data if not found or error
+      const sanityCourse = await sanityService.getCourseBySlug(slug);
+      if (sanityCourse) {
+        return {
+          id: sanityCourse._id,
+          slug: sanityCourse.slug,
+          title: sanityCourse.title,
+          description: sanityCourse.description,
+          thumbnail_url: sanityCourse.thumbnail_url,
+          difficulty: sanityCourse.difficulty,
+          duration_minutes: sanityCourse.duration_minutes ?? 0,
+          xp_reward: sanityCourse.xp_reward ?? 500,
+          category: sanityCourse.category ?? 'web3',
+          instructor_id: 'sanity',
+          published: sanityCourse.published ?? true,
+          order: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        } as Course;
+      }
+      // Fallback to mock
       const courses = await this.getCourses();
       return courses.find(c => c.slug === slug) || null;
     }
@@ -203,7 +211,23 @@ export class CourseService {
       .single();
 
     if (error || !data) {
-      console.warn('[v0] Error fetching lesson:', (error as any)?.message ?? error);
+      const sanityCourse = await sanityService.getCourseBySlug(courseSlug);
+      if (sanityCourse?.lessons) {
+        const mappedLessons = sanityCourse.lessons.map((l: any) => ({
+          id: l._id,
+          course_id: sanityCourse._id,
+          slug: l.slug,
+          title: l.title,
+          description: l.description,
+          content: '',
+          lesson_type: l.lesson_type,
+          duration_minutes: l.duration_minutes ?? 0,
+          order: 0,
+          xp_reward: l.xp_reward ?? 50,
+          video_url: l.video_url
+        })) as Lesson[];
+        return mappedLessons.find(l => l.slug === lessonSlug) || null;
+      }
       const lessons = await this.getCourseLessons(course.id);
       return lessons.find(l => l.slug === lessonSlug || l.id === lessonSlug) || null;
     }
