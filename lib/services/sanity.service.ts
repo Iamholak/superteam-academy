@@ -1,4 +1,4 @@
-import { sanityClient } from '../sanity/client';
+import { getSanityClient } from '../sanity/client';
 import type { Course, Lesson } from '../types';
 
 export class SanityService {
@@ -6,6 +6,11 @@ export class SanityService {
    * Fetch all courses from Sanity
    */
   async getCourses(): Promise<any[]> {
+    const sanityClient = getSanityClient();
+    if (!sanityClient) {
+      console.warn('[v0] Sanity not configured: NEXT_PUBLIC_SANITY_PROJECT_ID/NEXT_PUBLIC_SANITY_DATASET missing');
+      return [];
+    }
     const query = `*[_type == "course"] {
       _id,
       title,
@@ -25,6 +30,11 @@ export class SanityService {
    * Fetch a single course with its lessons
    */
   async getCourseBySlug(slug: string): Promise<any> {
+    const sanityClient = getSanityClient();
+    if (!sanityClient) {
+      console.warn('[v0] Sanity not configured: NEXT_PUBLIC_SANITY_PROJECT_ID/NEXT_PUBLIC_SANITY_DATASET missing');
+      return null;
+    }
     const query = `*[_type == "course" && slug.current == $slug][0] {
       _id,
       title,
