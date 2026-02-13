@@ -100,8 +100,8 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
       </section>
 
       {/* Features - Value Props */}
-      <section className="container py-32">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <section className="container py-24">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[
             {
               icon: <Shield className="h-8 w-8" />,
@@ -147,63 +147,43 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
           </p>
         </div>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[
-            {
-              title: 'Solana Fundamentals',
-              description: 'Start from scratch and understand the Solana blockchain inside out.',
-              courses: '2 courses',
-              time: '2 PM',
-              icon: <BookOpen className="h-5 w-5 text-primary" />,
-              active: false
-            },
-            {
-              title: 'DeFi Developer',
-              description: 'Master DeFi protocols and build your own decentralized finance applications.',
-              courses: '3 courses',
-              time: '30 h',
-              icon: <Zap className="h-5 w-5 text-primary" />,
-              active: false
-            },
-            {
-              title: 'Security Auditor',
-              description: 'Become a Solana security expert. Find bugs, write audits, protect protocols.',
-              courses: '3 courses',
-              time: '27 h',
-              icon: <Shield className="h-5 w-5 text-primary" />,
-              active: true
-            },
-            {
-              title: 'Full Stack Solana',
-              description: 'Build complete decentralized applications from backend to frontend.',
-              courses: '3 courses',
-              time: '33 h',
-              icon: <Code className="h-5 w-5 text-primary" />,
-              active: false
-            }
-          ].map((path, i) => (
-            <div 
-              key={i} 
-              className={`group p-6 rounded-2xl border transition-all duration-300 ${
-                path.active 
-                ? 'bg-primary/5 border-primary/30 shadow-[0_0_20px_rgba(20,241,149,0.05)]' 
-                : 'bg-card/30 border-white/5 hover:border-white/10 hover:bg-card/50'
-              }`}
-            >
-              <div className="mb-5 inline-flex p-2.5 rounded-xl bg-background border border-border group-hover:scale-110 transition-transform">
-                {path.icon}
-              </div>
-              <h3 className="text-xl font-bold mb-2 leading-tight">{path.title}</h3>
-              <p className="text-muted-foreground text-sm leading-relaxed mb-6 line-clamp-2">
-                {path.description}
-              </p>
-              <div className="flex items-center gap-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                <span>{path.courses}</span>
-                <span className="w-1 h-1 rounded-full bg-border" />
-                <span>{path.time}</span>
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="group p-6 rounded-2xl border bg-card/30 border-white/5 hover:border-white/10 hover:bg-card/50 transition-all">
+            <div className="mb-4 inline-flex p-2.5 rounded-xl bg-background border border-border">
+              <BookOpen className="h-5 w-5 text-primary" />
             </div>
-          ))}
+            <h3 className="text-lg font-bold mb-2 leading-tight">Solana Fundamentals</h3>
+            <p className="text-muted-foreground text-sm leading-relaxed mb-6 line-clamp-2">
+              Start from scratch and understand the Solana blockchain inside out.
+            </p>
+            <Button variant="ghost" asChild className="rounded-xl">
+              <Link href="/courses?category=development">Explore</Link>
+            </Button>
+          </div>
+          <div className="group p-6 rounded-2xl border bg-card/30 border-white/5 hover:border-white/10 hover:bg-card/50 transition-all">
+            <div className="mb-4 inline-flex p-2.5 rounded-xl bg-background border border-border">
+              <Zap className="h-5 w-5 text-primary" />
+            </div>
+            <h3 className="text-lg font-bold mb-2 leading-tight">DeFi Developer</h3>
+            <p className="text-muted-foreground text-sm leading-relaxed mb-6 line-clamp-2">
+              Master DeFi protocols and build decentralized finance applications.
+            </p>
+            <Button variant="ghost" asChild className="rounded-xl">
+              <Link href="/courses?category=defi">Explore</Link>
+            </Button>
+          </div>
+          <div className="group p-6 rounded-2xl border bg-card/30 border-white/5 hover:border-white/10 hover:bg-card/50 transition-all">
+            <div className="mb-4 inline-flex p-2.5 rounded-xl bg-background border border-border">
+              <Shield className="h-5 w-5 text-primary" />
+            </div>
+            <h3 className="text-lg font-bold mb-2 leading-tight">Security Auditor</h3>
+            <p className="text-muted-foreground text-sm leading-relaxed mb-6 line-clamp-2">
+              Find bugs, write audits, protect Solana protocols.
+            </p>
+            <Button variant="ghost" asChild className="rounded-xl">
+              <Link href="/courses?category=security">Explore</Link>
+            </Button>
+          </div>
         </div>
       </section>
       
@@ -253,17 +233,19 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
       </section>
 
       {/* CTA Section */}
-      <section className="container py-32">
-        <div className="relative rounded-[3rem] overflow-hidden bg-gradient-to-br from-violet-600/20 to-emerald-400/20 border border-white/10 p-10 md:p-20 text-center">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(20,241,149,0.1)_0%,transparent_70%)]" />
-          <div className="relative z-10 space-y-8">
-            <h2 className="text-4xl md:text-6xl font-black tracking-tighter">READY TO START?</h2>
-            <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
-              Join the next generation of Solana developers. Completely free.
+      <section className="container py-24">
+        <div className="relative rounded-[2rem] overflow-hidden border border-white/10 bg-gradient-to-b from-teal-900/30 to-slate-900/30 p-10 md:p-16">
+          <div className="absolute right-10 top-1/2 -translate-y-1/2 h-28 w-28 rounded-full ring-1 ring-white/15" />
+          <div className="relative z-10 text-center space-y-6">
+            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">
+              Ready to start your journey?
+            </h2>
+            <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto">
+              Join the Superteam Brazil community and become a top-tier Solana developer.
             </p>
             <div className="flex justify-center">
-              <Button size="lg" asChild className="h-14 px-10 text-lg font-black rounded-2xl bg-primary hover:scale-105 transition-all">
-                <Link href="/auth/sign-up">Get Started Now</Link>
+              <Button asChild className="h-11 px-6 rounded-full bg-white text-black hover:bg-white/90">
+                <Link href="/auth/sign-up">Create Free Account</Link>
               </Button>
             </div>
           </div>

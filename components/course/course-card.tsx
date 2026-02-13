@@ -19,7 +19,7 @@ export function CourseCard({ course }: CourseCardProps) {
 
   return (
     <Link href={`/courses/${course.slug}` as any}>
-      <Card className="group relative h-full overflow-hidden transition-all duration-500 hover:translate-y-[-4px] bg-white/[0.03] border-white/10 hover:border-primary/50 hover:bg-white/[0.05] rounded-[2rem]">
+      <Card className="group relative h-full overflow-hidden transition-all duration-300 hover:translate-y-[-2px] bg-white/[0.03] border-white/10 hover:border-primary/50 hover:bg-white/[0.05] rounded-[1.5rem]">
         <CardHeader className="p-0">
           <div className="relative aspect-[16/10] overflow-hidden bg-white/5">
             {course.thumbnail_url ? (
@@ -45,7 +45,7 @@ export function CourseCard({ course }: CourseCardProps) {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-6">
+        <CardContent className="p-5">
           <div className="mb-4 flex items-center gap-2">
             {course.difficulty && (
               <Badge variant="outline" className={cn("capitalize text-[9px] font-black tracking-widest h-5 px-2.5 rounded-full", difficultyColors[course.difficulty])}>
@@ -77,7 +77,7 @@ export function CourseCard({ course }: CourseCardProps) {
             </div>
           </div>
           
-          <div className="h-10 w-10 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-300">
+          <div className="h-9 w-9 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-300">
             <ArrowRight className="h-4 w-4" />
           </div>
         </CardFooter>

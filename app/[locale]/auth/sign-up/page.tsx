@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Link, useRouter } from '@/i18n/routing'
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Shield, Mail, Lock, UserPlus, ArrowRight, Loader2 } from 'lucide-react'
+import { Shield, Mail, Lock, UserPlus, ArrowRight, Loader2, Github, Chrome } from 'lucide-react'
 
 export default function SignUpPage() {
   const [email, setEmail] = useState('')
@@ -149,6 +149,33 @@ export default function SignUpPage() {
                     </>
                   )}
                 </Button>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="h-11 rounded-xl" 
+                    onClick={async () => {
+                      const supabase = createClient()
+                      await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}` } })
+                    }}
+                  >
+                    <Chrome className="mr-2 h-4 w-4" />
+                    Google
+                  </Button>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="h-11 rounded-xl" 
+                    onClick={async () => {
+                      const supabase = createClient()
+                      await supabase.auth.signInWithOAuth({ provider: 'github', options: { redirectTo: `${location.origin}${location.pathname}` } })
+                    }}
+                  >
+                    <Github className="mr-2 h-4 w-4" />
+                    GitHub
+                  </Button>
+                </div>
 
                 <div className="text-center text-sm">
                   <span className="text-muted-foreground">{t('hasAccount')}</span>{' '}

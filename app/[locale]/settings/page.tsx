@@ -15,9 +15,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useTranslations } from 'next-intl'
-import { Settings, User, Globe, Save, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Settings, User, Globe, Save, Loader2, CheckCircle2, AlertCircle, Link as LinkIcon, Unlink } from 'lucide-react'
 import { useRouter } from '@/i18n/routing'
 import { useTheme } from 'next-themes'
+import { useWallet } from '@solana/wallet-adapter-react'
 
 export default function SettingsPage() {
   const [profile, setProfile] = useState<any>(null)
@@ -32,6 +33,7 @@ export default function SettingsPage() {
   const router = useRouter()
   const supabase = createClient()
   const { theme, setTheme } = useTheme()
+  const { publicKey, connected } = useWallet()
 
   useEffect(() => {
     async function loadProfile() {
@@ -52,6 +54,21 @@ export default function SettingsPage() {
 
     loadProfile()
   }, [supabase, router])
+
+  useEffect(() => {
+    async function linkWalletAuto() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (connected && publicKey && user) {
+        await supabase
+          .from('profiles')
+          .update({ wallet_address: publicKey.toString(), updated_at: new Date().toISOString() })
+          .eq('id', user.id)
+        const updated = await userClientService.getProfile(user.id)
+        if (updated) setProfile(updated)
+      }
+    }
+    linkWalletAuto()
+  }, [connected, publicKey, supabase])
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -88,7 +105,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="container py-12 max-w-4xl space-y-8">
+    <div className="container py-12 max-w-4xl mx-auto space-y-8">
       <div className="space-y-2">
         <h1 className="text-4xl font-extrabold tracking-tight flex items-center gap-3">
           <Settings className="h-10 w-10 text-primary" />
@@ -132,6 +149,47 @@ export default function SettingsPage() {
                   placeholder={t('bioPlaceholder')}
                   className="bg-background/50 min-h-[120px]"
                 />
+              </div>
+              <div className="grid gap-2">
+                <Label>Wallet</Label>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    onClick={async () => {
+                      const { data: { user } } = await supabase.auth.getUser()
+                      if (!user || !publicKey) return
+                      await supabase
+                        .from('profiles')
+                        .update({ wallet_address: publicKey.toString(), updated_at: new Date().toISOString() })
+                        .eq('id', user.id)
+                      const updated = await userClientService.getProfile(user.id)
+                      if (updated) setProfile(updated)
+                    }}
+                  >
+                    <LinkIcon className="mr-2 h-4 w-4" />
+                    Link Connected Wallet
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="rounded-xl"
+                    onClick={async () => {
+                      const { data: { user } } = await supabase.auth.getUser()
+                      if (!user) return
+                      await supabase
+                        .from('profiles')
+                        .update({ wallet_address: null, updated_at: new Date().toISOString() })
+                        .eq('id', user.id)
+                      const updated = await userClientService.getProfile(user.id)
+                      if (updated) setProfile(updated)
+                    }}
+                  >
+                    <Unlink className="mr-2 h-4 w-4" />
+                    Unlink Wallet
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

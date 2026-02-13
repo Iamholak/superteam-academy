@@ -52,7 +52,7 @@ export function Footer() {
             <a href="https://github.com/superteamdao" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">GitHub</a>
           </div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-            &copy; {new Date().getFullYear()} Superteam DAO
+            &copy; {new Date().getFullYear()} Superteam Brazil
           </p>
         </div>
       </div>

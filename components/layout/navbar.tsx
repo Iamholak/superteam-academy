@@ -77,7 +77,8 @@ export function Navbar() {
   }, [connected, publicKey, user, supabase]);
 
   const handleLocaleChange = (newLocale: string) => {
-    router.replace(pathname, { locale: newLocale });
+    const normalized = pathname.replace(/^\/(en|pt|es)(?=\/|$)/, '') || '/';
+    router.replace(normalized, { locale: newLocale });
   };
 
   const handleLogout = async () => {
