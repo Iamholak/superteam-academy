@@ -23,9 +23,11 @@ export function EnrollButton({
   async function onClick() {
     setLoading(true)
     try {
-      const response = await fetch('/api/enroll', {
+      const url = typeof window !== 'undefined' ? `${window.location.origin}/api/enroll` : '/api/enroll'
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ courseId })
       })
       

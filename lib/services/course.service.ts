@@ -161,12 +161,6 @@ export class CourseService {
     const sanityCourse = await sanityService.getCourseBySlug(slug);
     
     if (sanityCourse) {
-      // Sync to DB if it exists in Sanity but not in DB
-      let dbId = dbCourse?.id;
-      if (!dbId) {
-        dbId = await this.syncCourseToDb(sanityCourse);
-      }
-
       const fallbackByCategory: Record<string, string> = {
         'web3': 'https://images.unsplash.com/photo-1640341719941-47700028189c?q=80&w=1200&auto=format&fit=crop',
         'solana-development': 'https://images.unsplash.com/photo-1640341719941-47700028189c?q=80&w=1200&auto=format&fit=crop',
@@ -176,7 +170,7 @@ export class CourseService {
         'smart-contracts': 'https://images.unsplash.com/photo-1640341719941-47700028189c?q=80&w=1200&auto=format&fit=crop',
       }
       return {
-        id: dbId,
+        id: dbCourse?.id || sanityCourse._id,
         sanity_id: sanityCourse._id,
         slug: sanityCourse.slug,
         title: sanityCourse.title,

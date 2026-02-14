@@ -12,16 +12,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Languages, User, Settings, Award, LayoutDashboard, LogOut } from 'lucide-react';
+import { Languages, User, Settings, Award, LayoutDashboard, LogOut, BookOpen, Trophy } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useEffect, useState } from 'react';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { useWallet } from '@solana/wallet-adapter-react';
 
 const navigationKeys = [
-  { name: 'home', href: '/' },
-  { name: 'courses', href: '/courses' },
-  { name: 'leaderboard', href: '/leaderboard' },
+  { name: 'courses', href: '/courses', icon: BookOpen },
+  { name: 'dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'leaderboard', href: '/leaderboard', icon: Trophy },
 ];
 
 export function Navbar() {
@@ -86,43 +86,51 @@ export function Navbar() {
     router.push('/');
   };
 
+  const shortKey = publicKey ? `${publicKey.toString().slice(0, 4)}…${publicKey
+    .toString()
+    .slice(-4)}` : null;
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
-      <div className="container flex h-20 items-center justify-between">
+      <div className="container flex h-14 items-center justify-between">
         <Link href="/" className="flex items-center space-x-2 group">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-black shadow-[0_0_20px_rgba(20,241,149,0.3)] group-hover:scale-110 transition-transform">
-              SA
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-black shadow-[0_0_16px_rgba(20,241,149,0.25)] group-hover:scale-110 transition-transform">
+              S
             </div>
-            <span className="hidden font-black sm:inline-block text-xl tracking-tighter uppercase group-hover:text-primary transition-colors">
+            <span className="hidden font-black sm:inline-block text-sm tracking-tight uppercase group-hover:text-primary transition-colors">
               Superteam Academy
             </span>
           </div>
         </Link>
 
-        <nav className="hidden md:flex items-center gap-8">
+        <nav className="hidden md:flex items-center gap-6">
           {navigationKeys.map((item) => (
             <Link
               key={item.href}
               href={item.href as any}
               className={cn(
-                'text-[10px] font-black uppercase tracking-[0.2em] transition-all hover:text-primary relative py-1',
-                pathname === item.href || (pathname === '' && item.href === '/')
+                'text-[10px] font-black uppercase tracking-[0.18em] transition-all hover:text-primary relative py-0.5',
+                pathname === item.href
                   ? 'text-foreground after:absolute after:-bottom-2 after:left-0 after:right-0 after:h-0.5 after:bg-primary after:rounded-full'
                   : 'text-muted-foreground'
               )}
             >
-              {t(item.name)}
+              <span className="inline-flex items-center gap-2">
+                <item.icon className="h-3.5 w-3.5" />
+                {t(item.name)}
+              </span>
             </Link>
           ))}
         </nav>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-white/5">
-                <Languages className="h-5 w-5" />
-                <span className="sr-only">Switch language</span>
+              <Button variant="ghost" className="h-8 px-3 rounded-lg hover:bg-white/5 text-[10px] font-black uppercase tracking-widest">
+                <Languages className="mr-2 h-3.5 w-3.5" />
+                <span>Language</span>
+                <span className="ml-1 text-muted-foreground">({locale.toUpperCase()})</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40 bg-background/95 backdrop-blur-xl border-white/10 rounded-2xl">
@@ -148,19 +156,25 @@ export function Navbar() {
           </DropdownMenu>
 
           <div className="hidden sm:block">
-            <WalletMultiButton className="!bg-white/5 !border !border-white/10 !rounded-xl !h-10 !text-[10px] !font-black !uppercase !tracking-widest hover:!bg-white/10 !transition-all" />
+            {connected && shortKey ? (
+              <span className="inline-flex items-center h-8 px-3 rounded-lg bg-violet-600 text-white text-[11px] font-black uppercase tracking-widest shadow-[0_0_14px_rgba(124,58,237,0.35)]">
+                {shortKey}
+              </span>
+            ) : (
+              <WalletMultiButton className="!bg-white/5 !border !border-white/10 !rounded-lg !h-8 !text-[10px] !font-black !uppercase !tracking-widest hover:!bg-white/10 !transition-all" />
+            )}
           </div>
           
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20">
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20">
                   <User className="h-5 w-5" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 bg-background/95 backdrop-blur-xl border-white/10 rounded-2xl p-2">
                 <div className="flex items-center gap-3 p-3 mb-2">
-                  <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center font-black text-primary">
+                  <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center font-black text-primary">
                     {user.email?.[0].toUpperCase()}
                   </div>
                   <div className="flex flex-col min-w-0">
@@ -204,7 +218,7 @@ export function Navbar() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Button asChild variant="default" className="rounded-xl font-black uppercase tracking-widest h-10 px-6 shadow-lg shadow-primary/20">
+            <Button asChild variant="default" className="rounded-lg font-black uppercase tracking-widest h-8 px-4 shadow-lg shadow-primary/20">
               <Link href="/auth/login">Join Now</Link>
             </Button>
           )}

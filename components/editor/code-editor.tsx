@@ -133,30 +133,47 @@ export function CodeEditor({
         />
       </div>
 
-      {/* Output Console */}
-      {result && (
-        <div className={cn(
-          "border-t border-white/5 p-4 animate-in slide-in-from-bottom-2 duration-300",
-          result.success ? "bg-primary/5" : "bg-red-500/5"
-        )}>
-          <div className="flex items-center gap-2 mb-2">
-            {result.success ? (
-              <CheckCircle2 className="h-4 w-4 text-primary" />
+      {/* Output Console (always visible) */}
+      <div
+        className={cn(
+          "border-t border-white/5 p-4",
+          result ? (result.success ? "bg-primary/5" : "bg-red-500/5") : "bg-black/20"
+        )}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            {result ? (
+              result.success ? (
+                <CheckCircle2 className="h-4 w-4 text-primary" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-500" />
+              )
             ) : (
-              <XCircle className="h-4 w-4 text-red-500" />
+              <Loader2 className={cn("h-4 w-4", isRunning ? "animate-spin text-primary" : "text-white/40")} />
             )}
-            <span className={cn(
-              "text-xs font-bold uppercase tracking-wider",
-              result.success ? "text-primary" : "text-red-500"
-            )}>
-              {result.success ? 'Success' : 'Error'}
+            <span
+              className={cn(
+                "text-xs font-bold uppercase tracking-wider",
+                result ? (result.success ? "text-primary" : "text-red-500") : "text-white/60"
+              )}
+            >
+              {result
+                ? result.success
+                  ? "Success"
+                  : "Error"
+                : isRunning
+                ? "Running..."
+                : "Output"}
             </span>
           </div>
-          <pre className="text-sm font-mono text-muted-foreground bg-black/20 p-3 rounded-lg overflow-x-auto">
-            {result.output}
-          </pre>
+          {!result && !isRunning && (
+            <span className="text-[10px] font-mono text-white/40 uppercase">Run code to see output</span>
+          )}
         </div>
-      )}
+        <pre className="text-sm font-mono text-muted-foreground bg-black/30 p-3 rounded-lg overflow-x-auto min-h-[80px]">
+          {result ? result.output : isRunning ? "Executing on Devnet (simulated)..." : ""}
+        </pre>
+      </div>
     </div>
   )
 }
