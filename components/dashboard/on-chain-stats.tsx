@@ -2,18 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { BlockchainService } from '@/lib/services/blockchain.service'
-import { ShieldCheck, Wallet, Loader2, Award, Zap } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
+import { ShieldCheck, Wallet, Loader2, Zap } from 'lucide-react'
 
 export function OnChainStats() {
   const { publicKey, connected } = useWallet()
   const [onChainXP, setOnChainXP] = useState<number | null>(null)
   const [credentialCount, setCredentialCount] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  
-  const blockchainService = new BlockchainService()
 
   useEffect(() => {
     async function loadOnChainData() {
@@ -21,14 +16,17 @@ export function OnChainStats() {
       
       setIsLoading(true)
       try {
-        const [xp, certs] = await Promise.all([
-          blockchainService.getXPBalance(publicKey.toString()),
-          blockchainService.getUserCredentials(publicKey.toString())
-        ])
-        setOnChainXP(xp)
-        setCredentialCount(certs.length)
+        const response = await fetch('/api/on-chain-stats', { credentials: 'include' })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Failed to load on-chain stats')
+        }
+        setOnChainXP(Number(payload?.xp || 0))
+        setCredentialCount(Number(payload?.verified || 0))
       } catch (error) {
         console.error('Error loading on-chain data:', error)
+        setOnChainXP(0)
+        setCredentialCount(0)
       } finally {
         setIsLoading(false)
       }

@@ -2,14 +2,43 @@ import { Link, redirect } from '@/i18n/routing';
 import { createClient } from '@/lib/supabase/server';
 import { userService } from '@/lib/services/user.service';
 import { courseService } from '@/lib/services/course.service';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { XPBadge } from '@/components/gamification/xp-badge';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { OnChainStats } from '@/components/dashboard/on-chain-stats';
-import { Trophy, Flame, BookOpen, ArrowRight, Star, Award, TrendingUp } from 'lucide-react';
-import { getTranslations } from 'next-intl/server';
-import { cn } from '@/lib/utils';
+import { DailyCheckIn } from '@/components/dashboard/daily-check-in';
+import {
+  ArrowRight,
+  Flame,
+  Star,
+  Trophy,
+  BookOpen,
+  Medal,
+  ShieldCheck,
+  Zap
+} from 'lucide-react';
+
+type HeatCell = {
+  date: string;
+  count: number;
+};
+
+function levelRange(level: number) {
+  const safe = Math.max(1, level || 1);
+  const min = safe <= 1 ? 0 : safe * safe * 100;
+  const max = (safe + 1) * (safe + 1) * 100;
+  return { min, max };
+}
+
+function mapHeatmap(cells: HeatCell[]) {
+  const max = Math.max(1, ...cells.map((c) => c.count));
+  return cells.map((cell) => {
+    const intensity = Math.min(1, cell.count / max);
+    return {
+      ...cell,
+      intensity
+    };
+  });
+}
 
 export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
@@ -21,196 +50,268 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
     return null;
   }
 
-  const userId = user.id as string;
-
-  const [profile, progress, enrollments, achievements, t] = await Promise.all([
+  const userId = user.id;
+  const [profile, progress, enrollments, achievements, rank, allCourses] = await Promise.all([
     userService.getProfile(userId),
     userService.getUserProgress(userId),
     courseService.getUserEnrollments(userId),
     userService.getUserAchievements(userId),
-    getTranslations('Dashboard')
+    userService.getUserRank(userId),
+    courseService.getCourses()
   ]);
 
-  const ct = await getTranslations('Course');
+  const days = 28;
+  const start = new Date();
+  start.setDate(start.getDate() - (days - 1));
+  const startIso = start.toISOString();
+
+  const { data: completionRows } = await supabase
+    .from('lesson_completions')
+    .select('completed_at')
+    .eq('user_id', userId)
+    .gte('completed_at', startIso);
+
+  const byDay = new Map<string, number>();
+  (completionRows || []).forEach((row: any) => {
+    const d = new Date(row.completed_at).toISOString().slice(0, 10);
+    byDay.set(d, (byDay.get(d) || 0) + 1);
+  });
+
+  // Count daily activity if user checked in today but completed no lesson.
+  const lastActivityDay = progress?.last_activity_date
+    ? new Date(progress.last_activity_date).toISOString().slice(0, 10)
+    : null;
+  if (lastActivityDay && !byDay.has(lastActivityDay)) {
+    byDay.set(lastActivityDay, 1);
+  }
+
+  const heatCells: HeatCell[] = Array.from({ length: days }).map((_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const key = d.toISOString().slice(0, 10);
+    return { date: key, count: byDay.get(key) || 0 };
+  });
+  const heatmap = mapHeatmap(heatCells);
+
+  const activeEnrollments = enrollments.filter((e: any) => (e.progress_percentage || 0) < 100);
+  const activeEnrollmentIds = activeEnrollments.map((e: any) => e.id);
+  const activeXpByEnrollment = new Map<string, number>();
+  if (activeEnrollmentIds.length > 0) {
+    const { data: xpRows } = await supabase
+      .from('lesson_completions')
+      .select('enrollment_id, xp_earned')
+      .eq('user_id', userId)
+      .in('enrollment_id', activeEnrollmentIds);
+
+    (xpRows || []).forEach((row: any) => {
+      const current = activeXpByEnrollment.get(row.enrollment_id) || 0;
+      activeXpByEnrollment.set(row.enrollment_id, current + Number(row.xp_earned || 0));
+    });
+  }
+  const enrolledCourseIds = new Set(enrollments.map((e: any) => e.course_id || e.courses?.id));
+  const recommendedCourses = allCourses.filter((c) => !enrolledCourseIds.has(c.id)).slice(0, 2);
+
+  const xp = progress?.total_xp || 0;
+  const level = progress?.level || 1;
+  const streak = progress?.current_streak || 0;
+  const { min, max } = levelRange(level);
+  const levelProgress = Math.max(0, Math.min(100, Math.round(((xp - min) / Math.max(1, max - min)) * 100)));
+
+  const categoryProgress = new Map<string, { total: number; count: number }>();
+  activeEnrollments.forEach((enrollment: any) => {
+    const category = enrollment.courses?.category || 'other';
+    const current = categoryProgress.get(category) || { total: 0, count: 0 };
+    categoryProgress.set(category, {
+      total: current.total + (enrollment.progress_percentage || 0),
+      count: current.count + 1
+    });
+  });
+
+  const skills = [
+    { label: 'Solana Basics', category: 'web3', color: 'from-violet-500 to-fuchsia-500' },
+    { label: 'Rust', category: 'solana-development', color: 'from-orange-500 to-rose-500' },
+    { label: 'NFTs', category: 'nfts', color: 'from-pink-500 to-purple-500' },
+    { label: 'DeFi', category: 'defi', color: 'from-amber-500 to-orange-500' }
+  ].map((skill) => {
+    const bucket = categoryProgress.get(skill.category);
+    const avg = bucket ? bucket.total / Math.max(1, bucket.count) : 0;
+    const level = Math.min(5, Math.round(avg / 20));
+    return { ...skill, level, progress: Math.min(100, Math.round(avg)) };
+  });
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
-      <div className="container py-20 space-y-16">
-        {/* Header Section */}
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-10">
-          <div className="space-y-6 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-black tracking-[0.2em] text-primary uppercase">
-              <TrendingUp className="h-3.5 w-3.5" />
-              Learning Overview
+    <div className="min-h-screen bg-background">
+      <div className="container space-y-8 py-12">
+        <section className="rounded-3xl border border-white/10 bg-white/[0.02] p-6 md:p-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Quest Dashboard</p>
+              <h1 className="text-4xl font-black tracking-tight md:text-5xl">
+                {profile?.username || user.email?.split('@')[0] || 'Learner'}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Joined {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : 'recently'} · {xp.toLocaleString()} XP · {streak} day streak
+              </p>
             </div>
-            <h1 className="text-5xl md:text-7xl font-black tracking-tighter uppercase leading-[0.9]">
-              {t('welcome', { username: profile?.username || 'Learner' }).split(' ')[0]} <span className="gradient-text">{t('welcome', { username: profile?.username || 'Learner' }).split(' ').slice(1).join(' ')}</span>
-            </h1>
-            <p className="text-lg md:text-xl text-muted-foreground font-medium leading-relaxed">
-              {t('continueJourney')} You're doing great, keep up the momentum.
-            </p>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-            <div className="flex items-center gap-6 p-6 rounded-[2rem] bg-white/[0.03] border border-white/10 backdrop-blur-xl group hover:border-primary/50 transition-colors">
-              <div className="flex flex-col">
-                <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">{t('totalXP')}</span>
-                <div className="flex items-center gap-2">
-                  <Star className="h-6 w-6 text-primary fill-primary" />
-                  <span className="text-4xl font-black text-white">{(progress?.total_xp || 0).toLocaleString()}</span>
-                </div>
-              </div>
-              <div className="h-12 w-px bg-white/10" />
-              <div className="flex flex-col items-center">
-                <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Level</span>
-                <div className="h-12 w-12 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center text-xl font-black shadow-[0_0_20px_rgba(20,241,149,0.3)]">
-                  {progress?.level || 1}
-                </div>
-              </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <DailyCheckIn />
+              <OnChainStats />
             </div>
-            <OnChainStats />
           </div>
-        </div>
+        </section>
 
-        {/* Stats Grid */}
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            { icon: Flame, color: 'text-orange-500', label: t('currentStreak'), value: progress?.current_streak || 0, sub: t('daysInARow') },
-            { icon: BookOpen, color: 'text-primary', label: t('enrolledCourses'), value: enrollments.length, sub: t('activeCourses') },
-            { icon: Trophy, color: 'text-amber-400', label: t('achievements'), value: achievements.length, sub: t('unlocked') },
-            { icon: Award, color: 'text-blue-400', label: 'Global Rank', value: '#124', sub: 'Top 5%' },
-          ].map((stat, i) => (
-            <Card key={i} className="relative overflow-hidden border-white/10 bg-white/[0.02] hover:bg-white/[0.05] transition-colors rounded-[2rem] p-8">
-              <div className="absolute top-6 right-6 p-3 rounded-2xl bg-white/5 border border-white/5">
-                <stat.icon className={cn("h-6 w-6", stat.color)} />
+            { label: 'Total XP', value: xp.toLocaleString(), icon: Zap, tone: 'text-amber-400' },
+            { label: 'Level', value: String(level), icon: Star, tone: 'text-violet-400' },
+            { label: 'Streak', value: String(streak), icon: Flame, tone: 'text-orange-400' },
+            { label: 'Rank', value: rank ? `#${rank}` : '-', icon: Trophy, tone: 'text-primary' }
+          ].map((card) => (
+            <div key={card.label} className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+              <p className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+                <card.icon className={`h-3.5 w-3.5 ${card.tone}`} />
+                {card.label}
+              </p>
+              <p className="text-4xl font-black tracking-tight">{card.value}</p>
+            </div>
+          ))}
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-3">
+          <div className="space-y-6 lg:col-span-2">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-xl font-black">Level {level} Progress</p>
+                <p className="text-sm text-muted-foreground">{xp.toLocaleString()} / {max.toLocaleString()} XP</p>
+              </div>
+              <ProgressBar progress={levelProgress} showLabel={false} className="h-3 rounded-full bg-white/10" />
+              <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Current</span>
+                <span>{levelProgress}% to Level {level + 1}</span>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+              <div className="mb-5 flex items-center justify-between">
+                <p className="text-xl font-black">Active Quests</p>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link href="/my-courses">
+                      View All
+                      <ArrowRight className="ml-1 h-4 w-4" />
+                    </Link>
+                  </Button>
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link href="/courses">
+                      Browse
+                      <ArrowRight className="ml-1 h-4 w-4" />
+                    </Link>
+                  </Button>
+                </div>
               </div>
               <div className="space-y-4">
-                <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{stat.label}</span>
-                <div>
-                  <div className="text-4xl font-black tracking-tight">{stat.value}</div>
-                  <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1 opacity-60">{stat.sub}</p>
-                </div>
+                {activeEnrollments.length > 0 ? activeEnrollments.slice(0, 3).map((enrollment: any) => (
+                  <Link
+                    key={enrollment.id}
+                    href={(enrollment.courses?.slug ? `/courses/${enrollment.courses.slug}` : '/courses') as any}
+                    className="block rounded-xl border border-white/10 bg-black/20 p-4 transition hover:border-primary/40 hover:bg-black/30"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="line-clamp-1 text-base font-bold">{enrollment.courses?.title}</p>
+                      <span className="text-sm text-muted-foreground">{enrollment.progress_percentage || 0}%</span>
+                    </div>
+                    <ProgressBar progress={enrollment.progress_percentage || 0} showLabel={false} className="h-2.5 rounded-full bg-white/10" />
+                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{enrollment.courses?.difficulty || 'beginner'}</span>
+                      <span>{(activeXpByEnrollment.get(enrollment.id) || 0).toLocaleString()} XP earned</span>
+                    </div>
+                  </Link>
+                )) : (
+                  <div className="rounded-xl border border-dashed border-white/10 p-6 text-sm text-muted-foreground">
+                    No active quests yet. Enroll in a course to start tracking progress.
+                  </div>
+                )}
               </div>
-            </Card>
-          ))}
-        </div>
+            </div>
 
-        {/* My Courses Section */}
-        <div className="space-y-8">
-          <div className="flex items-center justify-between px-2">
-            <h2 className="text-2xl font-black uppercase tracking-tight flex items-center gap-3">
-              <div className="h-8 w-1.5 bg-primary rounded-full" />
-              {t('myCourses')}
-            </h2>
-            <Button variant="ghost" size="sm" asChild className="text-xs font-black uppercase tracking-widest hover:text-primary transition-colors">
-              <Link href="/courses">
-                {t('browseMore')}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+              <p className="mb-5 text-xl font-black">Recommended Quests</p>
+              <div className="grid gap-4 md:grid-cols-2">
+                {recommendedCourses.map((course) => (
+                  <Link key={course.id} href={`/courses/${course.slug}` as any} className="rounded-xl border border-white/10 bg-black/20 p-4 transition hover:border-primary/40 hover:bg-black/30">
+                    <p className="line-clamp-1 font-bold">{course.title}</p>
+                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{course.description}</p>
+                    <p className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1"><BookOpen className="h-3.5 w-3.5" /> {Math.round((course.duration_minutes || 0) / 60)}h</span>
+                      <span className="inline-flex items-center gap-1"><Medal className="h-3.5 w-3.5 text-primary" /> {course.xp_reward || 0} XP</span>
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </div>
           </div>
 
-          {enrollments.length > 0 ? (
-            <div className="grid gap-6">
-              {enrollments.map((enrollment: any) => (
-                <Link
-                  key={enrollment.id}
-                  href={`/courses/${enrollment.courses?.slug}` as any}
-                  className="group"
-                >
-                  <Card className="overflow-hidden border-white/10 bg-white/[0.02] hover:bg-white/[0.05] hover:border-primary/50 transition-all duration-300 rounded-[2.5rem]">
-                    <CardContent className="p-8">
-                      <div className="flex flex-col lg:flex-row lg:items-center gap-10">
-                        <div className="flex-1 space-y-6">
-                          <div className="space-y-2">
-                            <h3 className="text-2xl font-black tracking-tight group-hover:text-primary transition-colors uppercase">
-                              {enrollment.courses?.title}
-                            </h3>
-                            <p className="text-muted-foreground font-medium line-clamp-1">
-                              {enrollment.courses?.description}
-                            </p>
-                          </div>
-                          
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest">
-                              <span className="text-muted-foreground">Course Completion</span>
-                              <span className="text-primary">{enrollment.progress_percentage}%</span>
-                            </div>
-                            <ProgressBar 
-                              progress={enrollment.progress_percentage} 
-                              showLabel={false} 
-                              className="h-3 rounded-full bg-white/5"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-6">
-                          <div className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-white/5 border border-white/10">
-                            <Star className="h-5 w-5 text-primary fill-primary" />
-                            <span className="text-sm font-black tracking-widest uppercase">{enrollment.courses?.xp_reward || 500} XP</span>
-                          </div>
-                          <Button className="h-14 px-8 rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-primary/20 group-hover:scale-105 transition-transform">
-                            {ct('continueCourse')}
-                            <ArrowRight className="ml-2 h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-24 rounded-[3rem] border-2 border-dashed border-white/10 bg-white/[0.01] text-center">
-              <div className="h-24 w-24 rounded-[2rem] bg-white/5 flex items-center justify-center mb-8 border border-white/5">
-                <BookOpen className="h-12 w-12 text-muted-foreground/20" />
-              </div>
-              <h3 className="text-3xl font-black tracking-tight uppercase mb-4">{t('noCourses')}</h3>
-              <p className="text-muted-foreground font-medium max-w-sm mb-10 px-6">
-                Start your journey today by enrolling in one of our expert-led Solana courses and earn cNFTs.
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+              <p className="mb-3 text-xl font-black">Activity</p>
+              <p className="mb-5 text-sm text-muted-foreground">
+                <span className="font-black text-orange-400">{streak}</span> day streak
               </p>
-              <Button size="lg" className="h-14 px-10 rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-primary/20" asChild>
-                <Link href="/courses">{t('browseCourses')}</Link>
-              </Button>
+              <div className="grid grid-cols-7 gap-1.5">
+                {heatmap.map((cell) => (
+                  <div
+                    key={cell.date}
+                    className="h-4 rounded-sm border border-white/5"
+                    style={{
+                      backgroundColor: `rgba(168,85,247,${cell.intensity * 0.65})`
+                    }}
+                    title={`${cell.date}: ${cell.count} completions`}
+                  />
+                ))}
+              </div>
             </div>
-          )}
-        </div>
 
-        {/* Recent Achievements */}
-        {achievements.length > 0 && (
-          <div className="space-y-8">
-            <div className="flex items-center justify-between px-2">
-              <h2 className="text-2xl font-black uppercase tracking-tight flex items-center gap-3">
-                <div className="h-8 w-1.5 bg-amber-400 rounded-full" />
-                {t('recentAchievements')}
-              </h2>
-              <Button variant="ghost" size="sm" asChild className="text-xs font-black uppercase tracking-widest hover:text-amber-400 transition-colors">
-                <Link href="/profile">
-                  {t('viewAll')}
-                  <ArrowRight className="ml-2 h-4 w-4" />
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-xl font-black">Achievements</p>
+                <Link href="/profile" className="text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-primary">
+                  View all
                 </Link>
-              </Button>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {(achievements || []).slice(0, 4).map((achievement: any) => (
+                  <div key={achievement.id} className="flex h-16 items-center justify-center rounded-xl border border-white/10 bg-black/25 text-2xl">
+                    {achievement.icon || '🏆'}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                {(achievements || []).length} achievements unlocked
+              </p>
             </div>
 
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {achievements.slice(0, 3).map((achievement: any) => (
-                <Card key={achievement.id} className="border-white/10 bg-white/[0.02] hover:bg-white/[0.05] hover:border-amber-400/30 transition-all rounded-[2.5rem] p-8">
-                  <div className="flex items-center gap-6">
-                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-amber-400/10 text-4xl border border-amber-400/20 shadow-inner">
-                      {achievement.icon}
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+              <p className="mb-4 text-xl font-black">Skills</p>
+              <div className="space-y-3">
+                {skills.map((skill) => (
+                  <div key={skill.label}>
+                    <div className="mb-1 flex items-center justify-between text-sm">
+                      <p>{skill.label}</p>
+                      <p className="text-muted-foreground">Lv.{skill.level}/5</p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="font-black text-xl tracking-tight uppercase">{achievement.title}</p>
-                      <p className="text-xs font-medium text-muted-foreground leading-relaxed">
-                        {achievement.description}
-                      </p>
+                    <div className="h-2 rounded-full bg-white/10">
+                      <div className={`h-2 rounded-full bg-gradient-to-r ${skill.color}`} style={{ width: `${skill.progress}%` }} />
                     </div>
                   </div>
-                </Card>
-              ))}
+                ))}
+              </div>
+              <p className="mt-4 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                Derived from your enrolled-course progress
+              </p>
             </div>
           </div>
-        )}
+        </section>
       </div>
     </div>
   );

@@ -22,6 +22,8 @@ import { cn } from '@/lib/utils';
 import { CodeEditor } from '@/components/editor/code-editor';
 import { Quiz } from '@/components/lesson/quiz';
 import { blocksToHtml } from '@/lib/utils/portableText';
+import { CompleteAndNavigateButton } from '@/components/lesson/complete-and-navigate-button';
+import { createClient } from '@/lib/supabase/server';
 
 interface LessonPageProps {
   params: Promise<{ locale: string; courseSlug: string; lessonSlug: string }>;
@@ -29,6 +31,12 @@ interface LessonPageProps {
 
 export default async function LessonPage({ params }: LessonPageProps) {
   const { locale, courseSlug, lessonSlug } = await params;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    redirect({ href: '/auth/login', locale });
+    return null;
+  }
   
   const course = await courseService.getCourseBySlug(courseSlug);
   if (!course) {
@@ -52,7 +60,69 @@ export default async function LessonPage({ params }: LessonPageProps) {
     return null;
   }
 
-  const currentIndex = lessons.findIndex(l => l.id === lesson!.id);
+  const resolvedCourseId =
+    await courseService.resolveCourseId(course.id) ||
+    await courseService.resolveCourseId(course.slug);
+  if (!resolvedCourseId) {
+    redirect({ href: `/courses/${course.slug}`, locale });
+    return null;
+  }
+
+  const allEnrollments = await courseService.getUserEnrollments(user.id);
+  const directEnrollment = await courseService.getUserEnrollment(user.id, resolvedCourseId);
+  const enrollment = directEnrollment
+    || allEnrollments.find((e: any) => e.course_id === resolvedCourseId)
+    || allEnrollments.find((e: any) => e.courses?.slug === course.slug);
+  if (!enrollment) {
+    redirect({ href: `/courses/${course.slug}`, locale });
+    return null;
+  }
+
+  const { data: completionRows } = await supabase
+    .from('lesson_completions')
+    .select('lesson_id, lessons(slug)')
+    .eq('user_id', user.id)
+    .eq('enrollment_id', enrollment.id);
+
+  const completedIds = new Set<string>();
+  const completedSlugs = new Set<string>();
+  for (const row of completionRows || []) {
+    if (row?.lesson_id) {
+      completedIds.add(row.lesson_id);
+    }
+    const lessonRef = Array.isArray((row as any).lessons)
+      ? (row as any).lessons[0]
+      : (row as any).lessons;
+    if (lessonRef?.slug) {
+      completedSlugs.add(lessonRef.slug);
+    }
+  }
+
+  const isLessonCompleted = (candidate: { id: string; slug?: string }) =>
+    completedIds.has(candidate.id) || Boolean(candidate.slug && completedSlugs.has(candidate.slug));
+
+  const completedCount = lessons.filter((l) => isLessonCompleted(l)).length;
+
+  const currentIndex = lessons.findIndex(l => l.slug === lesson!.slug || l.id === lesson!.id);
+  if (currentIndex < 0) {
+    redirect({ href: `/courses/${course.slug}`, locale });
+    return null;
+  }
+  let unlockedLessonIndex = Math.max(lessons.length - 1, 0);
+  for (let index = 0; index < lessons.length; index += 1) {
+    if (!isLessonCompleted(lessons[index])) {
+      unlockedLessonIndex = index;
+      break;
+    }
+  }
+
+  const currentCompleted = isLessonCompleted({ id: lesson.id, slug: lesson.slug });
+  if (currentIndex > unlockedLessonIndex && !currentCompleted) {
+    const target = lessons[unlockedLessonIndex];
+    redirect({ href: `/courses/${course.slug}/lessons/${target.slug || target.id}`, locale });
+    return null;
+  }
+
   const prevLesson = currentIndex > 0 ? lessons[currentIndex - 1] : null;
   const nextLesson = currentIndex < lessons.length - 1 ? lessons[currentIndex + 1] : null;
 
@@ -96,17 +166,33 @@ export default async function LessonPage({ params }: LessonPageProps) {
               <span className="text-xs font-bold text-accent">{lesson.xp_reward || 50} XP</span>
             </div>
             {isCourseCompleted ? (
-              <Button size="sm" className="font-bold shadow-lg shadow-accent/20 bg-accent hover:bg-accent/90 text-accent-foreground">
+              <CompleteAndNavigateButton
+                size="sm"
+                className="font-bold shadow-lg shadow-accent/20 bg-accent hover:bg-accent/90 text-accent-foreground"
+                lessonId={lesson.id}
+                lessonSlug={lesson.slug}
+                courseId={course.id}
+                courseTitle={course.title}
+                xpEarned={lesson.xp_reward || 50}
+                issueCertificateOnComplete
+                href="/certificates"
+              >
                 <CheckCircle className="mr-2 h-4 w-4" />
                 {t('completeCourse')}
-              </Button>
+              </CompleteAndNavigateButton>
             ) : (
-              <Button size="sm" className="font-bold shadow-lg shadow-primary/20" asChild>
-                <Link href={`/courses/${course.slug}/lessons/${nextLesson?.slug || nextLesson?.id}` as any}>
+              <CompleteAndNavigateButton
+                size="sm"
+                className="font-bold shadow-lg shadow-primary/20"
+                lessonId={lesson.id}
+                lessonSlug={lesson.slug}
+                courseId={course.id}
+                xpEarned={lesson.xp_reward || 50}
+                href={`/courses/${course.slug}/lessons/${nextLesson?.slug || nextLesson?.id}` as any}
+              >
                   {t('next')}
                   <ChevronRight className="ml-2 h-4 w-4" />
-                </Link>
-              </Button>
+              </CompleteAndNavigateButton>
             )}
           </div>
         </div>
@@ -233,17 +319,33 @@ export default async function LessonPage({ params }: LessonPageProps) {
                 <div />
               )}
               {nextLesson ? (
-                <Button size="lg" className="rounded-xl font-bold shadow-xl shadow-primary/20" asChild>
-                  <Link href={`/courses/${course.slug}/lessons/${nextLesson.slug || nextLesson.id}` as any}>
+                <CompleteAndNavigateButton
+                  size="lg"
+                  className="rounded-xl font-bold shadow-xl shadow-primary/20"
+                  lessonId={lesson.id}
+                  lessonSlug={lesson.slug}
+                  courseId={course.id}
+                  xpEarned={lesson.xp_reward || 50}
+                  href={`/courses/${course.slug}/lessons/${nextLesson.slug || nextLesson.id}` as any}
+                >
                     {t('next')}
                     <ChevronRight className="ml-2 h-5 w-5" />
-                  </Link>
-                </Button>
+                </CompleteAndNavigateButton>
               ) : (
-                <Button size="lg" className="rounded-xl font-bold shadow-xl shadow-accent/20 bg-accent hover:bg-accent/90 text-accent-foreground">
+                <CompleteAndNavigateButton
+                  size="lg"
+                  className="rounded-xl font-bold shadow-xl shadow-accent/20 bg-accent hover:bg-accent/90 text-accent-foreground"
+                  lessonId={lesson.id}
+                  lessonSlug={lesson.slug}
+                  courseId={course.id}
+                  courseTitle={course.title}
+                  xpEarned={lesson.xp_reward || 50}
+                  issueCertificateOnComplete
+                  href="/certificates"
+                >
                   <CheckCircle className="mr-2 h-5 w-5" />
                   {t('completeCourse')}
-                </Button>
+                </CompleteAndNavigateButton>
               )}
             </div>
           </div>
@@ -266,43 +368,59 @@ export default async function LessonPage({ params }: LessonPageProps) {
                   Progress: {currentIndex + 1} / {lessons.length}
                 </p>
               </div>
-              <CardContent className="p-2">
+              <CardContent className="max-h-[65vh] overflow-y-auto p-2 pr-1">
                 <div className="space-y-1">
                   {lessons.map((l, index) => {
                     const isActive = l.id === lesson!.id;
-                    const isCompleted = index < currentIndex;
+                    const isCompleted = isLessonCompleted(l);
+                    const isUnlocked = index <= unlockedLessonIndex || isCompleted;
                     
                     return (
-                      <Link
-                        key={l.id}
-                        href={`/courses/${course.slug}/lessons/${l.slug || l.id}` as any}
-                        className={cn(
-                          "group relative flex items-center gap-3 rounded-xl p-3 text-sm transition-all",
-                          isActive 
-                            ? "bg-primary/10 text-primary border border-primary/20" 
-                            : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        <div className={cn(
-                          "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold transition-colors",
-                          isActive 
-                            ? "bg-primary text-primary-foreground" 
-                            : isCompleted 
-                              ? "bg-primary/20 text-primary"
-                              : "bg-muted text-muted-foreground group-hover:bg-muted-foreground group-hover:text-background"
-                        )}>
-                          {isCompleted ? <CheckCircle className="h-3 w-3" /> : index + 1}
-                        </div>
-                        <span className={cn(
-                          "font-medium line-clamp-1 flex-1",
-                          isActive && "font-bold"
-                        )}>{l.title}</span>
-                        {lessonIcons[l.lesson_type as keyof typeof lessonIcons] && (
-                          <div className="opacity-40 group-hover:opacity-100 transition-opacity">
-                            {lessonIcons[l.lesson_type as keyof typeof lessonIcons]}
+                      isUnlocked ? (
+                        <Link
+                          key={l.id}
+                          href={`/courses/${course.slug}/lessons/${l.slug || l.id}` as any}
+                          className={cn(
+                            "group relative flex items-center gap-3 rounded-xl p-3 text-sm transition-all",
+                            isActive 
+                              ? "bg-primary/10 text-primary border border-primary/20" 
+                              : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          <div className={cn(
+                            "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold transition-colors",
+                            isActive 
+                              ? "bg-primary text-primary-foreground" 
+                              : isCompleted 
+                                ? "bg-primary/20 text-primary"
+                                : "bg-muted text-muted-foreground group-hover:bg-muted-foreground group-hover:text-background"
+                          )}>
+                            {isCompleted ? <CheckCircle className="h-3 w-3" /> : index + 1}
                           </div>
-                        )}
-                      </Link>
+                          <span className={cn(
+                            "font-medium line-clamp-1 flex-1",
+                            isActive && "font-bold"
+                          )}>{l.title}</span>
+                          {lessonIcons[l.lesson_type as keyof typeof lessonIcons] && (
+                            <div className="opacity-40 group-hover:opacity-100 transition-opacity">
+                              {lessonIcons[l.lesson_type as keyof typeof lessonIcons]}
+                            </div>
+                          )}
+                        </Link>
+                      ) : (
+                        <div
+                          key={l.id}
+                          className="group relative flex items-center gap-3 rounded-xl p-3 text-sm text-muted-foreground/60 opacity-70"
+                        >
+                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold bg-muted text-muted-foreground">
+                            {index + 1}
+                          </div>
+                          <span className="font-medium line-clamp-1 flex-1">{l.title}</span>
+                          <div className="opacity-60">
+                            <BookOpen className="h-4 w-4" />
+                          </div>
+                        </div>
+                      )
                     );
                   })}
                 </div>

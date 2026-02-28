@@ -11,6 +11,16 @@ export default async function LeaderboardPage({ params }: { params: Promise<{ lo
   const { locale } = await params;
   const topUsers = await userService.getLeaderboard(100);
   const t = await getTranslations('Leaderboard');
+  const hasPodium = topUsers.length >= 3;
+
+  const formatWallet = (wallet?: string | null) => {
+    if (!wallet) return null;
+    if (wallet.length <= 14) return wallet;
+    return `${wallet.slice(0, 8)}.......${wallet.slice(-6)}`;
+  };
+
+  const displayName = (user: any) =>
+    user?.profiles?.username || formatWallet(user?.profiles?.wallet_address) || 'Anonymous';
 
   const getRankIcon = (rank: number) => {
     if (rank === 1) return <Trophy className="h-6 w-6 text-yellow-500" />;
@@ -45,7 +55,7 @@ export default async function LeaderboardPage({ params }: { params: Promise<{ lo
         </div>
 
         {/* Top 3 Podium */}
-        {topUsers.length >= 3 && (
+        {hasPodium && (
           <div className="grid gap-12 md:grid-cols-3 items-end pt-12 max-w-5xl mx-auto px-4">
             {/* 2nd Place */}
             <div className="md:order-1">
@@ -64,12 +74,12 @@ export default async function LeaderboardPage({ params }: { params: Promise<{ lo
                       <Image src={(topUsers[1] as any).profiles.avatar_url} alt="" fill className="object-cover" />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center bg-zinc-800 text-2xl font-black">
-                        {(topUsers[1] as any).profiles?.username?.charAt(0).toUpperCase() || 'L'}
+                        {displayName(topUsers[1]).charAt(0).toUpperCase()}
                       </div>
                     )}
                   </div>
                 </div>
-                <h3 className="text-2xl font-black truncate tracking-tight">{(topUsers[1] as any).profiles?.username || 'Learner'}</h3>
+                <h3 className="text-2xl font-black truncate tracking-tight">{displayName(topUsers[1])}</h3>
                 <div className="mt-6 flex flex-col items-center gap-3">
                   <div className="px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-black tracking-widest uppercase text-muted-foreground">
                     Level {(topUsers[1] as any).level}
@@ -99,12 +109,12 @@ export default async function LeaderboardPage({ params }: { params: Promise<{ lo
                       <Image src={(topUsers[0] as any).profiles.avatar_url} alt="" fill className="object-cover" />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center bg-zinc-800 text-4xl font-black">
-                        {(topUsers[0] as any).profiles?.username?.charAt(0).toUpperCase() || 'L'}
+                        {displayName(topUsers[0]).charAt(0).toUpperCase()}
                       </div>
                     )}
                   </div>
                 </div>
-                <h3 className="text-3xl font-black truncate tracking-tighter">{(topUsers[0] as any).profiles?.username || 'Learner'}</h3>
+                <h3 className="text-3xl font-black truncate tracking-tighter">{displayName(topUsers[0])}</h3>
                 <div className="mt-8 flex flex-col items-center gap-4">
                   <div className="px-6 py-2 rounded-full bg-primary text-primary-foreground text-[12px] font-black tracking-[0.2em] uppercase">
                     Level {(topUsers[0] as any).level}
@@ -134,12 +144,12 @@ export default async function LeaderboardPage({ params }: { params: Promise<{ lo
                       <Image src={(topUsers[2] as any).profiles.avatar_url} alt="" fill className="object-cover" />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center bg-zinc-800 text-2xl font-black">
-                        {(topUsers[2] as any).profiles?.username?.charAt(0).toUpperCase() || 'L'}
+                        {displayName(topUsers[2]).charAt(0).toUpperCase()}
                       </div>
                     )}
                   </div>
                 </div>
-                <h3 className="text-2xl font-black truncate tracking-tight">{(topUsers[2] as any).profiles?.username || 'Learner'}</h3>
+                <h3 className="text-2xl font-black truncate tracking-tight">{displayName(topUsers[2])}</h3>
                 <div className="mt-6 flex flex-col items-center gap-3">
                   <div className="px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-black tracking-widest uppercase text-muted-foreground">
                     Level {(topUsers[2] as any).level}
@@ -174,7 +184,7 @@ export default async function LeaderboardPage({ params }: { params: Promise<{ lo
                     key={user.user_id}
                     className={cn(
                       "flex items-center gap-4 p-5 md:p-6 transition-all hover:bg-white/[0.05] group",
-                      index < 3 && "hidden md:flex" // Hide top 3 on list for desktop as they are on podium
+                      hasPodium && index < 3 && "hidden md:flex" // Hide top 3 on list for desktop only when podium exists
                     )}
                   >
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl font-black text-sm border border-white/10 bg-white/5 group-hover:border-primary/50 group-hover:text-primary transition-colors">
@@ -186,14 +196,14 @@ export default async function LeaderboardPage({ params }: { params: Promise<{ lo
                         <Image src={user.profiles.avatar_url} alt="" fill className="object-cover" />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center text-sm font-bold">
-                          {user.profiles?.username?.charAt(0).toUpperCase() || 'L'}
+                          {displayName(user).charAt(0).toUpperCase()}
                         </div>
                       )}
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <p className="font-bold text-xl truncate tracking-tight group-hover:text-primary transition-colors">
-                        {user.profiles?.username || 'Anonymous'}
+                        {displayName(user)}
                       </p>
                       <div className="flex items-center gap-3 mt-1">
                         <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">

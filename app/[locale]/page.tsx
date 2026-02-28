@@ -1,14 +1,15 @@
 import { Link } from '@/i18n/routing';
 import { Button } from '@/components/ui/button';
 import { CourseCard } from '@/components/course/course-card';
-import { ArrowRight, BookOpen, Trophy, Users, Zap, Shield, Globe, Star, Rocket, Code, Sparkles } from 'lucide-react';
+import { ArrowRight, BookOpen, Trophy, Zap, Shield, Globe, Code, TerminalSquare, PlayCircle, CheckCircle2 } from 'lucide-react';
 import { courseService } from '@/lib/services/course.service';
 import { getTranslations } from 'next-intl/server';
 import { createClient } from '@/lib/supabase/server';
 
 export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
-  const { locale } = await params;
+  await params;
   const featuredCourses = await courseService.getCourses();
+  const platformStats = await courseService.getLandingStats();
   const topCourses = featuredCourses.slice(0, 5);
   
   const supabase = await createClient();
@@ -16,6 +17,11 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
   
   const t = await getTranslations('Landing');
   const commonT = await getTranslations('Common');
+  const formatCompact = (value: number) =>
+    new Intl.NumberFormat('en-US', {
+      notation: 'compact',
+      maximumFractionDigits: 1
+    }).format(Math.max(0, value));
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -66,10 +72,10 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
             {/* Stats / Social Proof */}
             <div className="pt-20 grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto animate-in fade-in duration-1000 delay-700">
               {[
-                { label: t('statsActiveStudents'), value: '10K+' },
-                { label: t('statsCourses'), value: '50+' },
-                { label: t('statsCnftsMinted'), value: '25K+' },
-                { label: t('statsXpEarned'), value: '2M+' },
+                { label: t('statsActiveStudents'), value: formatCompact(platformStats.activeStudents) },
+                { label: t('statsCourses'), value: formatCompact(platformStats.totalCourses) },
+                { label: t('statsCnftsMinted'), value: formatCompact(platformStats.totalCnftsMinted) },
+                { label: t('statsXpEarned'), value: formatCompact(platformStats.totalXpEarned) },
               ].map((stat, i) => (
                 <div key={i} className="space-y-1">
                   <div className="text-3xl font-black gradient-text">{stat.value}</div>
@@ -96,7 +102,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {topCourses.map((course) => (
             <CourseCard key={course.id} course={course} />
           ))}
@@ -139,6 +145,47 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Coding Interface Preview */}
+      <section className="container py-24">
+        <div className="grid items-center gap-10 lg:grid-cols-2">
+          <div className="space-y-4">
+            <p className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-black uppercase tracking-[0.2em] text-primary">
+              <TerminalSquare className="h-4 w-4" />
+              In-browser IDE
+            </p>
+            <h2 className="text-3xl font-black tracking-tight sm:text-5xl">{t('featureIdeTitle')}</h2>
+            <p className="text-muted-foreground">{t('featureIdeDescription')}</p>
+            <div className="grid gap-3 text-sm text-muted-foreground">
+              <p className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-primary" /> Run tests instantly</p>
+              <p className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-primary" /> Track XP per exercise</p>
+              <p className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-primary" /> Save progress lesson-by-lesson</p>
+            </div>
+            <Button asChild className="rounded-xl font-black uppercase tracking-widest">
+              <Link href="/courses">
+                Try Coding Lessons
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-[#0d1224] p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between rounded-2xl bg-white/5 px-4 py-2 text-xs text-white/60">
+              <span>lesson.ts</span>
+              <span className="inline-flex items-center gap-1"><PlayCircle className="h-3.5 w-3.5 text-primary" /> Run</span>
+            </div>
+            <div className="rounded-2xl bg-black/30 p-4 font-mono text-sm leading-7 text-white/85">
+              <p><span className="text-sky-300">export</span> <span className="text-fuchsia-300">function</span> <span className="text-amber-300">derivePDA</span>() {'{'}</p>
+              <p className="pl-4"><span className="text-sky-300">const</span> seed = <span className="text-emerald-300">'user-progress'</span>;</p>
+              <p className="pl-4"><span className="text-sky-300">return</span> [seed, walletPublicKey];</p>
+              <p>{'}'}</p>
+            </div>
+            <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-xs text-primary">
+              Test result: 3/3 passed, +50 XP awarded.
+            </div>
+          </div>
         </div>
       </section>
 

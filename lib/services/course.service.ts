@@ -3,10 +3,72 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
-import type { Course, Lesson, Enrollment, LessonCompletion } from '@/lib/types';
+import { createAdminClient } from '@/lib/supabase/admin';
+import type { Course, Lesson, Enrollment, LessonCompletion, CompleteLessonResult } from '@/lib/types';
 import { sanityService } from './sanity.service';
+import { blockchainService } from './blockchain.service';
+import { userService } from './user.service';
 
 export class CourseService {
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  async resolveCourseId(courseId: string): Promise<string | null> {
+    if (this.isUuid(courseId)) {
+      return courseId;
+    }
+
+    const supabase = await createClient();
+    const { data: existingBySanityId } = await supabase
+      .from('courses')
+      .select('id')
+      .eq('sanity_id', courseId)
+      .single();
+
+    if (existingBySanityId?.id) {
+      return existingBySanityId.id;
+    }
+
+    const { data: existingBySlug } = await supabase
+      .from('courses')
+      .select('id')
+      .eq('slug', courseId)
+      .single();
+
+    if (existingBySlug?.id) {
+      return existingBySlug.id;
+    }
+
+    const sanityCourses = await sanityService.getCourses();
+    const sanityCourse = sanityCourses.find((c: any) => c._id === courseId || c.slug === courseId);
+    if (!sanityCourse) {
+      return null;
+    }
+
+    const syncedId = await this.syncCourseToDb(sanityCourse);
+    if (this.isUuid(syncedId)) {
+      return syncedId;
+    }
+
+    const { data: bySlugAfterSync } = await supabase
+      .from('courses')
+      .select('id')
+      .eq('slug', sanityCourse.slug)
+      .single();
+    if (bySlugAfterSync?.id) {
+      return bySlugAfterSync.id;
+    }
+
+    const { data: afterSync } = await supabase
+      .from('courses')
+      .select('id')
+      .eq('sanity_id', sanityCourse._id)
+      .single();
+
+    return afterSync?.id || null;
+  }
+
   /**
    * Get all published courses
    */
@@ -107,11 +169,46 @@ export class CourseService {
     return courses;
   }
 
+  async getLandingStats(): Promise<{
+    activeStudents: number;
+    totalCourses: number;
+    totalCnftsMinted: number;
+    totalXpEarned: number;
+  }> {
+    const admin = createAdminClient();
+    const client = admin || await createClient();
+
+    const [
+      profilesCountResult,
+      coursesCountResult,
+      certificatesCountResult,
+      xpRowsResult
+    ] = await Promise.all([
+      client.from('profiles').select('*', { count: 'exact', head: true }),
+      client.from('courses').select('*', { count: 'exact', head: true }).eq('is_published', true),
+      client.from('course_certificates').select('*', { count: 'exact', head: true }),
+      client.from('user_progress').select('total_xp')
+    ]);
+
+    const xpRows = xpRowsResult.data || [];
+    const totalXpEarned = xpRows.reduce((sum: number, row: any) => sum + Number(row?.total_xp || 0), 0);
+
+    return {
+      activeStudents: profilesCountResult.count || 0,
+      totalCourses: coursesCountResult.count || 0,
+      totalCnftsMinted: certificatesCountResult.count || 0,
+      totalXpEarned
+    };
+  }
+
   /**
    * Sync course from Sanity to Supabase
    */
   async syncCourseToDb(sanityCourse: any): Promise<string> {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
+    if (!supabase) {
+      return '';
+    }
     
     const { data: existing } = await supabase
       .from('courses')
@@ -123,7 +220,7 @@ export class CourseService {
 
     const { data, error } = await supabase
       .from('courses')
-      .insert({
+      .upsert({
         sanity_id: sanityCourse._id,
         title: sanityCourse.title,
         slug: sanityCourse.slug,
@@ -133,13 +230,13 @@ export class CourseService {
         thumbnail_url: sanityCourse.thumbnail_url,
         estimated_hours: Math.ceil(sanityCourse.duration_minutes / 60),
         is_published: sanityCourse.published ?? true
-      })
+      }, { onConflict: 'sanity_id' })
       .select('id')
       .single();
 
     if (error) {
       console.error('[CourseService] Error syncing course to DB:', error.message);
-      return sanityCourse._id;
+      return '';
     }
 
     return data.id;
@@ -161,6 +258,21 @@ export class CourseService {
     const sanityCourse = await sanityService.getCourseBySlug(slug);
     
     if (sanityCourse) {
+      let syncedCourseId = dbCourse?.id;
+      if (!syncedCourseId) {
+        const createdId = await this.syncCourseToDb(sanityCourse);
+        if (this.isUuid(createdId)) {
+          syncedCourseId = createdId;
+        } else {
+          const { data: fallback } = await supabase
+            .from('courses')
+            .select('id')
+            .eq('slug', sanityCourse.slug)
+            .single();
+          syncedCourseId = fallback?.id;
+        }
+      }
+
       const fallbackByCategory: Record<string, string> = {
         'web3': 'https://images.unsplash.com/photo-1640341719941-47700028189c?q=80&w=1200&auto=format&fit=crop',
         'solana-development': 'https://images.unsplash.com/photo-1640341719941-47700028189c?q=80&w=1200&auto=format&fit=crop',
@@ -170,7 +282,7 @@ export class CourseService {
         'smart-contracts': 'https://images.unsplash.com/photo-1640341719941-47700028189c?q=80&w=1200&auto=format&fit=crop',
       }
       return {
-        id: dbCourse?.id || sanityCourse._id,
+        id: syncedCourseId || sanityCourse._id,
         sanity_id: sanityCourse._id,
         slug: sanityCourse.slug,
         title: sanityCourse.title,
@@ -218,33 +330,7 @@ export class CourseService {
 
     if (error || !data || data.length === 0) {
       console.warn('[v0] Error fetching lessons:', (error as any)?.message ?? error);
-      // Fallback to mock lessons if DB error
-      return [
-        {
-          id: 'l1',
-          course_id: courseId,
-          slug: 'intro-to-solana',
-          title: 'Introduction to Solana',
-          description: 'Learn the basics of Solana blockchain.',
-          content: 'Solana is a high-performance blockchain...',
-          lesson_type: 'video',
-          duration_minutes: 15,
-          order: 0,
-          xp_reward: 100
-        },
-        {
-          id: 'l2',
-          course_id: courseId,
-          slug: 'account-model',
-          title: 'The Account Model',
-          description: 'Understand how Solana stores data.',
-          content: 'Everything in Solana is an account...',
-          lesson_type: 'reading',
-          duration_minutes: 20,
-          order: 1,
-          xp_reward: 150
-        }
-      ] as Lesson[];
+      return [];
     }
 
     return data.map(lesson => ({
@@ -288,17 +374,30 @@ export class CourseService {
   async getMergedCourseLessons(courseSlug: string, courseId: string): Promise<Lesson[]> {
     const sanityCourse = await sanityService.getCourseBySlug(courseSlug);
     const sanityLessons = await this.getCourseLessonsBySlug(courseSlug);
-    const dbLessons = await this.getCourseLessons(courseId);
+    const dbCourseId = await this.resolveCourseId(courseId);
+    const dbLessons = dbCourseId ? await this.getCourseLessons(dbCourseId) : [];
+
+    try {
+      if (sanityCourse && dbCourseId) {
+        await this.ensureLessonsSynced(dbCourseId, sanityCourse);
+      }
+    } catch (error) {
+      console.warn('[CourseService] Lesson sync failed, falling back to available lessons:', error);
+    }
 
     if (sanityLessons.length === 0) return dbLessons;
+    if (!dbCourseId || dbLessons.length === 0) return sanityLessons;
 
-    // Merge logic: use dbLessons as base for IDs and course_id, but enrich with Sanity data
+    const dbBySlug = new Map(dbLessons.map((lesson) => [lesson.slug, lesson]));
+    const dbBySanityId = new Map((dbLessons as any[]).map((lesson: any) => [lesson.sanity_id, lesson]));
+
+    // Graceful fallback: if mapping is incomplete, still return lessons for rendering.
     return sanityLessons.map(sl => {
-      const dbL = dbLessons.find(dl => dl.slug === sl.slug);
+      const dbL = dbBySlug.get(sl.slug) || dbBySanityId.get(sl.id);
       return {
         ...sl,
         id: dbL?.id || sl.id,
-        course_id: courseId || sl.course_id
+        course_id: dbCourseId || sl.course_id
       };
     });
   }
@@ -511,9 +610,104 @@ export class CourseService {
     lessonId: string,
     enrollmentId: string,
     xpEarned: number
-  ): Promise<LessonCompletion | null> {
+  ): Promise<CompleteLessonResult> {
     const supabase = await createClient();
-    
+    if (!this.isUuid(lessonId)) {
+      throw new Error('Invalid lesson ID');
+    }
+
+    const { data: enrollment } = await supabase
+      .from('enrollments')
+      .select('id, user_id, course_id')
+      .eq('id', enrollmentId)
+      .single();
+
+    if (!enrollment || enrollment.user_id !== userId) {
+      throw new Error('Enrollment not found for user');
+    }
+
+    const { data: lesson } = await supabase
+      .from('lessons')
+      .select('id, course_id, order_index, slug')
+      .eq('id', lessonId)
+      .single();
+
+    if (!lesson || lesson.course_id !== enrollment.course_id) {
+      throw new Error('Lesson does not belong to enrolled course');
+    }
+
+    const { data: publishedLessons, error: publishedLessonsError } = await supabase
+      .from('lessons')
+      .select('id, slug, order_index')
+      .eq('course_id', enrollment.course_id)
+      .eq('is_published', true)
+      .order('order_index', { ascending: true });
+
+    if (publishedLessonsError) {
+      throw new Error(`Failed loading lessons for lock check: ${publishedLessonsError.message}`);
+    }
+
+    let orderedLessons = publishedLessons || [];
+    if (orderedLessons.length === 0) {
+      const { data: fallbackLessons, error: fallbackLessonsError } = await supabase
+        .from('lessons')
+        .select('id, slug, order_index')
+        .eq('course_id', enrollment.course_id)
+        .order('order_index', { ascending: true });
+      if (fallbackLessonsError) {
+        throw new Error(`Failed loading fallback lessons for lock check: ${fallbackLessonsError.message}`);
+      }
+      orderedLessons = fallbackLessons || [];
+    }
+
+    const { data: completionRows, error: completionRowsError } = await supabase
+      .from('lesson_completions')
+      .select('lesson_id, lessons(slug)')
+      .eq('user_id', userId)
+      .eq('enrollment_id', enrollmentId);
+
+    if (completionRowsError) {
+      throw new Error(`Failed loading completion state for lock check: ${completionRowsError.message}`);
+    }
+
+    const completedIds = new Set<string>();
+    const completedSlugs = new Set<string>();
+    for (const row of completionRows || []) {
+      if ((row as any)?.lesson_id) {
+        completedIds.add((row as any).lesson_id);
+      }
+      const lessonRef = Array.isArray((row as any).lessons)
+        ? (row as any).lessons[0]
+        : (row as any).lessons;
+      if (lessonRef?.slug) {
+        completedSlugs.add(lessonRef.slug);
+      }
+    }
+
+    const isLessonDone = (candidate: { id: string; slug?: string }) =>
+      completedIds.has(candidate.id) || Boolean(candidate.slug && completedSlugs.has(candidate.slug));
+
+    const targetIndex = orderedLessons.findIndex((l: any) => l.id === lesson.id || l.slug === lesson.slug);
+    if (targetIndex < 0) {
+      throw new Error('Lesson does not belong to enrolled course');
+    }
+
+    const targetAlreadyCompleted = isLessonDone(lesson as any);
+    if (!targetAlreadyCompleted) {
+      let nextPendingIndex = orderedLessons.length - 1;
+      for (let index = 0; index < orderedLessons.length; index += 1) {
+        if (!isLessonDone(orderedLessons[index] as any)) {
+          nextPendingIndex = index;
+          break;
+        }
+      }
+
+      if (targetIndex !== nextPendingIndex) {
+        throw new Error('Complete lessons in order to continue');
+      }
+    }
+
+    let completionId: string | undefined;
     const { data, error } = await supabase
       .from('lesson_completions')
       .insert({
@@ -526,14 +720,55 @@ export class CourseService {
       .single();
 
     if (error) {
-      console.warn('[v0] Error completing lesson:', (error as any)?.message ?? error);
-      return null;
+      if ((error as any).code === '23505') {
+        const { data: existingCompletion } = await supabase
+          .from('lesson_completions')
+          .select('id, enrollment_id')
+          .eq('user_id', userId)
+          .eq('lesson_id', lessonId)
+          .single();
+
+        if (existingCompletion && existingCompletion.enrollment_id !== enrollmentId) {
+          // Data-repair path: same lesson was previously completed under a stale/wrong
+          // enrollment. Move completion to the active enrollment so progress can advance.
+          const { error: relinkError } = await supabase
+            .from('lesson_completions')
+            .update({ enrollment_id: enrollmentId, xp_earned: xpEarned })
+            .eq('id', existingCompletion.id);
+
+          if (relinkError) {
+            throw new Error(relinkError.message || 'Failed to reconcile lesson completion');
+          }
+        }
+
+        const progressState = await this.updateEnrollmentProgress(enrollmentId);
+        return {
+          completed: true,
+          progressPercentage: progressState.progressPercentage,
+          courseCompleted: progressState.courseCompleted,
+          certificate: progressState.certificate,
+          certificateError: progressState.certificateError
+        };
+      }
+      throw new Error((error as any)?.message || 'Failed to complete lesson');
+    }
+    completionId = data.id;
+
+    const progressState = await this.updateEnrollmentProgress(enrollmentId, completionId);
+    await userService.addXP(userId, xpEarned);
+    await userService.updateStreak(userId);
+    await userService.awardAchievement(userId, 'first_lesson');
+    if (progressState.courseCompleted) {
+      await userService.awardAchievement(userId, 'course_complete');
     }
 
-    // Update enrollment progress
-    await this.updateEnrollmentProgress(enrollmentId);
-
-    return data as LessonCompletion;
+    return {
+      completed: true,
+      progressPercentage: progressState.progressPercentage,
+      courseCompleted: progressState.courseCompleted,
+      certificate: progressState.certificate,
+      certificateError: progressState.certificateError
+    };
   }
 
   /**
@@ -541,12 +776,14 @@ export class CourseService {
    */
   async getUserCompletedLessons(userId: string, courseId: string): Promise<string[]> {
     const supabase = await createClient();
-    
+    const resolvedCourseId = await this.resolveCourseId(courseId);
+    if (!resolvedCourseId) return [];
+
     const { data: enrollment } = await supabase
       .from('enrollments')
       .select('id')
       .eq('user_id', userId)
-      .eq('course_id', courseId)
+      .eq('course_id', resolvedCourseId)
       .single();
 
     if (!enrollment) return [];
@@ -565,36 +802,218 @@ export class CourseService {
     return data.map(c => c.lesson_id);
   }
 
+  async getUserCompletedLessonSlugs(userId: string, courseId: string): Promise<string[]> {
+    const supabase = await createClient();
+
+    const resolvedCourseId = await this.resolveCourseId(courseId);
+    if (!resolvedCourseId) return [];
+
+    const { data: enrollment } = await supabase
+      .from('enrollments')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('course_id', resolvedCourseId)
+      .single();
+
+    if (!enrollment) return [];
+
+    const { data, error } = await supabase
+      .from('lesson_completions')
+      .select('lessons(slug)')
+      .eq('user_id', userId)
+      .eq('enrollment_id', enrollment.id);
+
+    if (error) {
+      console.warn('[v0] Error fetching completed lesson slugs:', (error as any)?.message ?? error);
+      return [];
+    }
+
+    return (data || [])
+      .map((row: any) => row.lessons?.slug)
+      .filter(Boolean);
+  }
+
+  async ensureCourseCertificate(
+    userId: string,
+    courseId: string,
+    lessonCompletionId?: string
+  ): Promise<{ mintAddress: string; signature: string }> {
+    const resolvedCourseId = await this.resolveCourseId(courseId);
+    if (!resolvedCourseId) {
+      throw new Error('Course not found for certificate issuance');
+    }
+
+    const supabase = await createClient();
+    const { data: enrollment } = await supabase
+      .from('enrollments')
+      .select('id, completed_at, progress_percentage')
+      .eq('user_id', userId)
+      .eq('course_id', resolvedCourseId)
+      .single();
+
+    if (!enrollment) {
+      throw new Error('Enrollment required to issue certificate');
+    }
+
+    const { data: publishedLessons, error: publishedLessonsError } = await supabase
+      .from('lessons')
+      .select('id, slug')
+      .eq('course_id', resolvedCourseId)
+      .eq('is_published', true);
+
+    if (publishedLessonsError) {
+      throw new Error(`Failed to verify course completion: ${publishedLessonsError.message}`);
+    }
+
+    let published = publishedLessons || [];
+    if (published.length === 0) {
+      const { data: fallbackLessons, error: fallbackLessonsError } = await supabase
+        .from('lessons')
+        .select('id, slug')
+        .eq('course_id', resolvedCourseId);
+      if (fallbackLessonsError) {
+        throw new Error(`Failed to load fallback lessons: ${fallbackLessonsError.message}`);
+      }
+      published = fallbackLessons || [];
+    }
+    const lessonIds = published.map((lesson: any) => lesson.id).filter(Boolean);
+    const lessonSlugs = new Set(published.map((lesson: any) => lesson.slug).filter(Boolean));
+    let progress = enrollment.progress_percentage || 0;
+    if (published.length > 0) {
+      const { data: completionRows, error: completedLessonsError } = await supabase
+        .from('lesson_completions')
+        .select('lesson_id, lessons(slug)')
+        .eq('enrollment_id', enrollment.id);
+
+      if (completedLessonsError) {
+        throw new Error(`Failed to verify lesson completions: ${completedLessonsError.message}`);
+      }
+
+      const completedIds = new Set<string>();
+      const completedSlugs = new Set<string>();
+      for (const row of completionRows || []) {
+        if ((row as any)?.lesson_id) {
+          completedIds.add((row as any).lesson_id);
+        }
+        const lessonRef = Array.isArray((row as any).lessons)
+          ? (row as any).lessons[0]
+          : (row as any).lessons;
+        if (lessonRef?.slug) {
+          completedSlugs.add(lessonRef.slug);
+        }
+      }
+
+      const matchedCompleted = published.filter((lesson: any) => {
+        return completedIds.has(lesson.id) || (lesson.slug && completedSlugs.has(lesson.slug));
+      }).length;
+
+      progress = Math.min(100, Math.round((matchedCompleted / published.length) * 100));
+    }
+
+    if (progress < 100) {
+      throw new Error('Course must be completed before certificate issuance');
+    }
+
+    if (!enrollment.completed_at || (enrollment.progress_percentage || 0) !== progress) {
+      await supabase
+        .from('enrollments')
+        .update({
+          progress_percentage: progress,
+          completed_at: enrollment.completed_at || new Date().toISOString()
+        })
+        .eq('id', enrollment.id);
+    }
+
+    const certificate = await this.issueCompletionCertificate(
+      userId,
+      resolvedCourseId,
+      lessonCompletionId
+    );
+
+    if (!certificate) {
+      throw new Error('Failed to issue certificate');
+    }
+
+    return certificate;
+  }
+
   /**
    * Update enrollment progress percentage
    */
-  private async updateEnrollmentProgress(enrollmentId: string): Promise<void> {
+  private async updateEnrollmentProgress(
+    enrollmentId: string,
+    lessonCompletionId?: string
+  ): Promise<{
+    progressPercentage: number;
+    courseCompleted: boolean;
+    certificate?: { mintAddress: string; signature: string };
+    certificateError?: string;
+  }> {
     const supabase = await createClient();
     
     // Get enrollment with course
     const { data: enrollment } = await supabase
       .from('enrollments')
-      .select('*, courses(id)')
+      .select('id, user_id, course_id, completed_at, progress_percentage')
       .eq('id', enrollmentId)
       .single();
 
-    if (!enrollment) return;
+    if (!enrollment) {
+      throw new Error('Enrollment not found');
+    }
 
-    // Get total lessons
-    const { count: totalLessons } = await supabase
+    // Only published lessons should count toward completion.
+    const { data: publishedLessons, error: publishedLessonsError } = await supabase
       .from('lessons')
-      .select('*', { count: 'exact', head: true })
-      .eq('course_id', enrollment.courses.id);
+      .select('id, slug')
+      .eq('course_id', enrollment.course_id)
+      .eq('is_published', true);
 
-    // Get completed lessons
-    const { count: completedLessons } = await supabase
-      .from('lesson_completions')
-      .select('*', { count: 'exact', head: true })
-      .eq('enrollment_id', enrollmentId);
+    if (publishedLessonsError) {
+      throw new Error(`Failed to load lessons for progress: ${publishedLessonsError.message}`);
+    }
 
-    if (totalLessons && completedLessons !== null) {
-      const progress = Math.round((completedLessons / totalLessons) * 100);
-      
+    let published = publishedLessons || [];
+    if (published.length === 0) {
+      const { data: fallbackLessons, error: fallbackLessonsError } = await supabase
+        .from('lessons')
+        .select('id, slug')
+        .eq('course_id', enrollment.course_id);
+      if (fallbackLessonsError) {
+        throw new Error(`Failed to load fallback lessons for progress: ${fallbackLessonsError.message}`);
+      }
+      published = fallbackLessons || [];
+    }
+    const totalLessons = published.length;
+
+    if (totalLessons > 0) {
+      const { data: completionRows, error: completedLessonsError } = await supabase
+        .from('lesson_completions')
+        .select('lesson_id, lessons(slug)')
+        .eq('enrollment_id', enrollmentId);
+
+      if (completedLessonsError) {
+        throw new Error(`Failed to load completions for progress: ${completedLessonsError.message}`);
+      }
+
+      const completedIds = new Set<string>();
+      const completedSlugs = new Set<string>();
+      for (const row of completionRows || []) {
+        if ((row as any)?.lesson_id) {
+          completedIds.add((row as any).lesson_id);
+        }
+        const lessonRef = Array.isArray((row as any).lessons)
+          ? (row as any).lessons[0]
+          : (row as any).lessons;
+        if (lessonRef?.slug) {
+          completedSlugs.add(lessonRef.slug);
+        }
+      }
+
+      const matchedCompleted = published.filter((lesson: any) => {
+        return completedIds.has(lesson.id) || (lesson.slug && completedSlugs.has(lesson.slug));
+      }).length;
+      const progress = Math.min(100, Math.round((matchedCompleted / totalLessons) * 100));
       await supabase
         .from('enrollments')
         .update({ 
@@ -602,7 +1021,207 @@ export class CourseService {
           completed_at: progress === 100 ? new Date().toISOString() : null
         })
         .eq('id', enrollmentId);
+
+      const certificate: { mintAddress: string; signature: string } | undefined = undefined;
+      const certificateError: string | undefined = undefined;
+
+      return {
+        progressPercentage: progress,
+        courseCompleted: progress === 100,
+        certificate,
+        certificateError
+      };
     }
+
+    return {
+      progressPercentage: 0,
+      courseCompleted: false
+    };
+  }
+
+  private async ensureLessonsSynced(dbCourseId: string, sanityCourse: any): Promise<void> {
+    if (!sanityCourse?.lessons?.length) {
+      return;
+    }
+
+    const supabase = createAdminClient();
+    if (!supabase) {
+      return;
+    }
+    const { data: existing } = await supabase
+      .from('lessons')
+      .select('id, sanity_id, slug')
+      .eq('course_id', dbCourseId);
+
+    const existingSanityIds = new Set((existing || []).map((l: any) => l.sanity_id));
+    const existingSlugs = new Set((existing || []).map((l: any) => l.slug));
+
+    // Check global sanity_id collisions so we can re-link existing rows
+    // instead of failing on unique constraint "lessons_sanity_id_key".
+    const sanityIds = sanityCourse.lessons.map((lesson: any) => lesson._id).filter(Boolean);
+    const sanitySlugs = sanityCourse.lessons.map((lesson: any) => lesson.slug).filter(Boolean);
+    const sanityIdSet = new Set(sanityIds);
+    const sanitySlugSet = new Set(sanitySlugs);
+
+    // Keep published lesson set aligned with Sanity to avoid stale lessons
+    // blocking progress and completion.
+    const staleLessonIds = (existing || [])
+      .filter((lesson: any) => {
+        const sanityIdMatch = Boolean(lesson.sanity_id) && sanityIdSet.has(lesson.sanity_id);
+        const slugMatch = Boolean(lesson.slug) && sanitySlugSet.has(lesson.slug);
+        return !sanityIdMatch && !slugMatch;
+      })
+      .map((lesson: any) => lesson.id);
+
+    if (staleLessonIds.length > 0) {
+      const { error: staleUpdateError } = await supabase
+        .from('lessons')
+        .update({ is_published: false })
+        .in('id', staleLessonIds);
+
+      if (staleUpdateError) {
+        console.warn('[CourseService] Failed to archive stale lessons:', staleUpdateError.message);
+      }
+    }
+
+    const { data: existingGlobalBySanityId } = await supabase
+      .from('lessons')
+      .select('id, sanity_id, course_id, slug')
+      .in('sanity_id', sanityIds);
+    const bySanityId = new Map((existingGlobalBySanityId || []).map((row: any) => [row.sanity_id, row]));
+
+    const inserts: any[] = [];
+    for (let index = 0; index < sanityCourse.lessons.length; index += 1) {
+      const lesson = sanityCourse.lessons[index];
+      if (existingSanityIds.has(lesson._id) || existingSlugs.has(lesson.slug)) {
+        continue;
+      }
+
+      const globalExisting = bySanityId.get(lesson._id);
+      if (globalExisting?.id) {
+        // Re-link to the current course and keep metadata fresh.
+        const { error: updateError } = await supabase
+          .from('lessons')
+          .update({
+            course_id: dbCourseId,
+            title: lesson.title,
+            slug: lesson.slug,
+            description: lesson.description || '',
+            content_type: lesson.lesson_type === 'reading'
+              ? 'article'
+              : lesson.lesson_type === 'coding'
+                ? 'interactive'
+                : lesson.lesson_type,
+            xp_reward: lesson.xp_reward ?? 50,
+            order_index: lesson.order_index ?? index,
+            estimated_minutes: lesson.duration_minutes ?? 0,
+            is_published: true
+          })
+          .eq('id', globalExisting.id);
+
+        if (!updateError) {
+          existingSanityIds.add(lesson._id);
+          existingSlugs.add(lesson.slug);
+          continue;
+        }
+      }
+
+      inserts.push({
+        sanity_id: lesson._id,
+        course_id: dbCourseId,
+        title: lesson.title,
+        slug: lesson.slug,
+        description: lesson.description || '',
+        content_type: lesson.lesson_type === 'reading'
+          ? 'article'
+          : lesson.lesson_type === 'coding'
+            ? 'interactive'
+            : lesson.lesson_type,
+        xp_reward: lesson.xp_reward ?? 50,
+        order_index: lesson.order_index ?? index,
+        estimated_minutes: lesson.duration_minutes ?? 0,
+        is_published: true
+      });
+    }
+
+    if (!inserts.length) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from('lessons')
+      .upsert(inserts, { onConflict: 'sanity_id' });
+
+    if (error) {
+      throw new Error(`Failed syncing lessons: ${error.message}`);
+    }
+  }
+
+  private async issueCompletionCertificate(
+    userId: string,
+    courseId: string,
+    lessonCompletionId?: string
+  ): Promise<{ mintAddress: string; signature: string } | undefined> {
+    const supabase = await createClient();
+
+    const { data: existingCert } = await supabase
+      .from('course_certificates')
+      .select('mint_address, signature')
+      .eq('user_id', userId)
+      .eq('course_id', courseId)
+      .single();
+
+    if (existingCert?.mint_address && existingCert?.signature) {
+      return {
+        mintAddress: existingCert.mint_address,
+        signature: existingCert.signature
+      };
+    }
+
+    const [{ data: profile }, { data: course }] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('wallet_address')
+        .eq('id', userId)
+        .single(),
+      supabase
+        .from('courses')
+        .select('title')
+        .eq('id', courseId)
+        .single()
+    ]);
+
+    if (!profile?.wallet_address) {
+      throw new Error('Wallet not linked; cannot issue certificate');
+    }
+
+    const result = await blockchainService.issueCourseCertificate(
+      profile.wallet_address,
+      courseId,
+      course?.title || 'Course'
+    );
+
+    const { error } = await supabase
+      .from('course_certificates')
+      .upsert({
+        user_id: userId,
+        course_id: courseId,
+        lesson_completion_id: lessonCompletionId || null,
+        wallet_address: profile.wallet_address,
+        mint_address: result.mintAddress,
+        signature: result.signature,
+        network: 'devnet',
+        metadata_uri: null
+      }, { onConflict: 'user_id,course_id' });
+
+    if (error) {
+      throw new Error(`Failed persisting certificate: ${error.message}`);
+    }
+
+    return {
+      mintAddress: result.mintAddress,
+      signature: result.signature
+    };
   }
 }
 

@@ -9,13 +9,19 @@ import { createClient } from '@/lib/supabase/client'
 
 export function EnrollButton({ 
   courseId, 
+  courseSlug,
   firstLessonHref, 
   label,
+  isEnrolled = false,
+  disabled = false,
   className 
 }: { 
   courseId: string; 
+  courseSlug?: string;
   firstLessonHref: string; 
   label: string;
+  isEnrolled?: boolean;
+  disabled?: boolean;
   className?: string;
 }) {
   const [loading, setLoading] = useState(false)
@@ -23,6 +29,11 @@ export function EnrollButton({
   const supabase = createClient()
 
   async function onClick() {
+    if (loading || disabled) return
+    if (isEnrolled) {
+      router.push(firstLessonHref as any)
+      return
+    }
     setLoading(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -31,20 +42,24 @@ export function EnrollButton({
         return
       }
 
-      const url = typeof window !== 'undefined' ? `${window.location.origin}/api/enroll` : '/api/enroll'
+      const url = '/api/enroll'
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ courseId })
+        body: JSON.stringify({ courseId, courseSlug })
       })
       
       if (!response.ok) {
-        console.error('Enrollment failed:', await response.text())
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error || 'Enrollment failed')
       }
-      router.push(firstLessonHref)
+      router.push(firstLessonHref as any)
     } catch (error) {
       console.error('Error during enrollment:', error)
+      if (typeof window !== 'undefined') {
+        window.alert(error instanceof Error ? error.message : 'Enrollment failed')
+      }
     } finally {
       setLoading(false)
     }
@@ -58,7 +73,7 @@ export function EnrollButton({
         className
       )} 
       onClick={onClick} 
-      disabled={loading}
+      disabled={loading || disabled}
     >
       {label}
       <ArrowRight className="ml-2 h-5 w-5" />

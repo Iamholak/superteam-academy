@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Space_Grotesk, Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google'
+import { Sora, Manrope, Fira_Code } from 'next/font/google'
 import '../globals.css'
 import { ThemeProvider } from '@/components/providers/theme-provider'
 import { WalletProvider } from '@/components/providers/wallet-provider'
@@ -11,17 +11,17 @@ import { getMessages } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { routing } from '@/i18n/routing';
 
-const spaceGrotesk = Space_Grotesk({
+const sora = Sora({
   variable: '--font-heading',
   subsets: ['latin'],
 })
 
-const plusJakarta = Plus_Jakarta_Sans({
+const manrope = Manrope({
   variable: '--font-sans',
   subsets: ['latin'],
 })
 
-const jetbrainsMono = JetBrains_Mono({
+const firaCode = Fira_Code({
   variable: '--font-mono',
   subsets: ['latin'],
 })
@@ -51,7 +51,7 @@ export default async function RootLayout(props: {
   return (
     <html lang={locale} suppressHydrationWarning>
       <body
-        className={`${plusJakarta.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${manrope.variable} ${sora.variable} ${firaCode.variable} font-sans antialiased`}
       >
         <NextIntlClientProvider messages={messages}>
           <ThemeProvider

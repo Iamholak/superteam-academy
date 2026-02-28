@@ -3,9 +3,17 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import type { Profile, UserProgress, Achievement, UserAchievement } from '@/lib/types';
 
 export class UserService {
+  private toUTCDateString(input: Date | string): string {
+    const d = new Date(input);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
+      d.getUTCDate()
+    ).padStart(2, '0')}`;
+  }
+
   /**
    * Get user profile
    */
@@ -92,12 +100,14 @@ export class UserService {
     const leveledUp = newLevel > (currentProgress.level || 1);
 
     // Update progress
+    const today = this.toUTCDateString(new Date());
+
     const { data, error } = await supabase
       .from('user_progress')
       .update({
         total_xp: newTotalXP,
         level: newLevel,
-        last_activity_date: new Date().toISOString(),
+        last_activity_date: today,
         updated_at: new Date().toISOString()
       })
       .eq('user_id', userId)
@@ -109,8 +119,9 @@ export class UserService {
       return null;
     }
 
+    await this.checkXPAchievements(userId, newTotalXP);
+
     if (leveledUp) {
-      // TODO: Trigger level up notification/achievement
       console.log(`[v0] User ${userId} leveled up to ${newLevel}!`);
     }
 
@@ -131,14 +142,19 @@ export class UserService {
     if (!progress) return null;
 
     const now = new Date();
+    const today = this.toUTCDateString(now);
     const lastActivity = progress.last_activity_date ? new Date(progress.last_activity_date) : null;
+    const lastActivityDay = lastActivity ? this.toUTCDateString(lastActivity) : null;
     
     let newStreak = progress.current_streak || 0;
     
     if (!lastActivity) {
       newStreak = 1;
     } else {
-      const diffInDays = Math.floor((now.getTime() - lastActivity.getTime()) / (1000 * 3600 * 24));
+      const diffInDays = Math.floor(
+        (new Date(`${today}T00:00:00.000Z`).getTime() - new Date(`${lastActivityDay}T00:00:00.000Z`).getTime()) /
+          (1000 * 3600 * 24)
+      );
       
       if (diffInDays === 1) {
         newStreak += 1;
@@ -155,61 +171,100 @@ export class UserService {
       .update({
         current_streak: newStreak,
         longest_streak: newLongestStreak,
-        last_activity_date: now.toISOString(),
+        last_activity_date: today,
         updated_at: now.toISOString()
       })
       .eq('user_id', userId)
       .select()
       .single();
 
+    if (data) {
+      await this.checkStreakAchievements(userId, data.current_streak || 0);
+    }
+
     return data as UserProgress;
+  }
+
+  async dailyCheckIn(userId: string): Promise<{ checkedIn: boolean; xpAwarded: number; progress: UserProgress | null }> {
+    const supabase = await createClient();
+    const today = this.toUTCDateString(new Date());
+    const { data: progress } = await supabase
+      .from('user_progress')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (!progress) {
+      return { checkedIn: false, xpAwarded: 0, progress: null };
+    }
+
+    const lastActivityDay = progress.last_activity_date
+      ? this.toUTCDateString(progress.last_activity_date)
+      : null;
+
+    if (lastActivityDay === today) {
+      return { checkedIn: false, xpAwarded: 0, progress: progress as UserProgress };
+    }
+
+    const streak = await this.updateStreak(userId);
+    const updated = await this.addXP(userId, 10);
+    return { checkedIn: true, xpAwarded: 10, progress: updated || streak };
   }
 
   /**
    * Get leaderboard data
    */
   async getLeaderboard(limit = 10): Promise<any[]> {
-    const supabase = await createClient();
-    const { data, error } = await supabase
+    const supabase = createAdminClient() || await createClient();
+    const { data: progressRows, error } = await supabase
       .from('user_progress')
-      .select(`
-        *,
-        profiles:user_id (
-          username,
-          avatar_url
-        )
-      `)
+      .select('*')
       .order('total_xp', { ascending: false })
       .limit(limit);
 
     if (error) {
-      // Return mock data if database is not ready
-      return [
-        {
-          user_id: 'mock-1',
-          total_xp: 5000,
-          level: 5,
-          current_streak: 7,
-          profiles: { username: 'SuperBuilder', avatar_url: null }
-        },
-        {
-          user_id: 'mock-2',
-          total_xp: 3500,
-          level: 4,
-          current_streak: 3,
-          profiles: { username: 'SolanaDev', avatar_url: null }
-        },
-        {
-          user_id: 'mock-3',
-          total_xp: 2000,
-          level: 3,
-          current_streak: 5,
-          profiles: { username: 'Web3Learner', avatar_url: null }
-        }
-      ];
+      console.error('[v0] Error fetching leaderboard:', error);
+      return [];
     }
 
-    return data;
+    if (!progressRows || progressRows.length === 0) {
+      return [];
+    }
+
+    const userIds = progressRows.map((row: any) => row.user_id);
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, username, avatar_url, wallet_address')
+      .in('id', userIds);
+
+    if (profilesError) {
+      console.warn('[v0] Error fetching leaderboard profiles:', profilesError);
+    }
+
+    const profileById = new Map((profiles || []).map((profile: any) => [profile.id, profile]));
+    return progressRows.map((row: any) => ({
+      ...row,
+      profiles: profileById.get(row.user_id) || null
+    }));
+  }
+
+  async getUserRank(userId: string): Promise<number> {
+    const supabase = await createClient();
+
+    const { data: me } = await supabase
+      .from('user_progress')
+      .select('total_xp')
+      .eq('user_id', userId)
+      .single();
+
+    if (!me) return 0;
+
+    const { count } = await supabase
+      .from('user_progress')
+      .select('*', { count: 'exact', head: true })
+      .gt('total_xp', me.total_xp || 0);
+
+    return (count || 0) + 1;
   }
 
   /**
@@ -283,11 +338,7 @@ export class UserService {
    * Formula: level = floor(sqrt(xp / 100)) + 1 (simplified example)
    */
   private calculateLevel(xp: number): number {
-    if (xp < 1000) return 1;
-    if (xp < 2500) return 2;
-    if (xp < 5000) return 3;
-    if (xp < 10000) return 4;
-    return Math.floor(Math.sqrt(xp / 100)) + 1;
+    return Math.max(1, Math.floor(Math.sqrt(Math.max(0, xp) / 100)));
   }
 
   /**
@@ -311,6 +362,9 @@ export class UserService {
    * Check and award streak-based achievements
    */
   private async checkStreakAchievements(userId: string, streak: number): Promise<void> {
+    if (streak >= 3) {
+      await this.awardAchievement(userId, 'streak_3');
+    }
     if (streak >= 7) {
       await this.awardAchievement(userId, 'streak_7');
     }

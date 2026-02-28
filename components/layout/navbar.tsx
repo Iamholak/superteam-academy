@@ -2,7 +2,6 @@
 
 import { usePathname, Link, useRouter } from '@/i18n/routing';
 import { useLocale, useTranslations } from 'next-intl';
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -12,11 +11,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Languages, User, Settings, Award, LayoutDashboard, LogOut, BookOpen, Trophy } from 'lucide-react';
+import { Languages, User, Settings, Award, LayoutDashboard, LogOut, BookOpen, Trophy, FolderOpen } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useEffect, useState } from 'react';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { WalletConnectModal } from '@/components/wallet/wallet-connect-modal';
 
 const navigationKeys = [
   { name: 'courses', href: '/courses', icon: BookOpen },
@@ -30,6 +30,7 @@ export function Navbar() {
   const locale = useLocale();
   const router = useRouter();
   const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [lastLinkedWallet, setLastLinkedWallet] = useState<string | null>(null);
   const supabase = createClient();
   const { publicKey, connected } = useWallet();
 
@@ -47,34 +48,31 @@ export function Navbar() {
     return () => subscription.unsubscribe();
   }, [supabase]);
 
-  // Link wallet to profile when connected
   useEffect(() => {
     const linkWallet = async () => {
-      if (connected && publicKey && user) {
-        const walletAddr = publicKey.toString();
-        
-        // Check if profile already has this wallet or needs update
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('wallet_address')
-          .eq('id', user.id)
-          .single();
-        
-        if (profile && profile.wallet_address !== walletAddr) {
-          console.log('[v0] Linking wallet to profile:', walletAddr);
-          await supabase
-            .from('profiles')
-            .update({ 
-              wallet_address: walletAddr,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', user.id);
-        }
+      if (!connected || !publicKey || !user) return;
+
+      const walletAddr = publicKey.toString();
+      if (lastLinkedWallet === walletAddr) {
+        return;
       }
+
+      const response = await fetch('/api/wallet/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ walletAddress: walletAddr })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        console.warn('[v0] Failed to link wallet to profile:', payload?.error || response.statusText);
+        return;
+      }
+      setLastLinkedWallet(walletAddr);
     };
 
     linkWallet();
-  }, [connected, publicKey, user, supabase]);
+  }, [connected, publicKey, user, lastLinkedWallet]);
 
   const handleLocaleChange = (newLocale: string) => {
     const normalized = pathname.replace(/^\/(en|pt|es)(?=\/|$)/, '') || '/';
@@ -85,10 +83,6 @@ export function Navbar() {
     await supabase.auth.signOut();
     router.push('/');
   };
-
-  const shortKey = publicKey ? `${publicKey.toString().slice(0, 4)}…${publicKey
-    .toString()
-    .slice(-4)}` : null;
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
@@ -134,36 +128,22 @@ export function Navbar() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40 bg-background/95 backdrop-blur-xl border-white/10 rounded-2xl">
-              <DropdownMenuItem 
-                onClick={() => handleLocaleChange('en')}
-                className={cn("rounded-xl font-bold uppercase text-[10px] tracking-widest mt-1", locale === 'en' && "bg-primary/10 text-primary")}
-              >
+              <DropdownMenuItem onClick={() => handleLocaleChange('en')} className={cn('rounded-xl font-bold uppercase text-[10px] tracking-widest mt-1', locale === 'en' && 'bg-primary/10 text-primary')}>
                 English
               </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => handleLocaleChange('pt')}
-                className={cn("rounded-xl font-bold uppercase text-[10px] tracking-widest mt-1", locale === 'pt' && "bg-primary/10 text-primary")}
-              >
-                Português
+              <DropdownMenuItem onClick={() => handleLocaleChange('pt')} className={cn('rounded-xl font-bold uppercase text-[10px] tracking-widest mt-1', locale === 'pt' && 'bg-primary/10 text-primary')}>
+                Portugues
               </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => handleLocaleChange('es')}
-                className={cn("rounded-xl font-bold uppercase text-[10px] tracking-widest mb-1 mt-1", locale === 'es' && "bg-primary/10 text-primary")}
-              >
-                Español
+              <DropdownMenuItem onClick={() => handleLocaleChange('es')} className={cn('rounded-xl font-bold uppercase text-[10px] tracking-widest mb-1 mt-1', locale === 'es' && 'bg-primary/10 text-primary')}>
+                Espanol
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div className="hidden sm:flex items-center gap-2">
-            {connected && shortKey && (
-              <span className="inline-flex items-center h-8 px-3 rounded-lg bg-violet-600 text-white text-[11px] font-black uppercase tracking-widest shadow-[0_0_14px_rgba(124,58,237,0.35)]">
-                {shortKey}
-              </span>
-            )}
-            <WalletMultiButton className="!bg-white/5 !border !border-white/10 !rounded-lg !h-8 !text-[10px] !font-black !uppercase !tracking-widest hover:!bg-white/10 !transition-all" />
+          <div className="flex items-center gap-2">
+            <WalletConnectModal />
           </div>
-          
+
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -195,6 +175,12 @@ export function Navbar() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild className="rounded-xl font-bold uppercase text-[10px] tracking-widest p-3 mt-1 cursor-pointer">
+                  <Link href="/my-courses" className="flex items-center">
+                    <FolderOpen className="mr-3 h-4 w-4" />
+                    My Courses
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild className="rounded-xl font-bold uppercase text-[10px] tracking-widest p-3 mt-1 cursor-pointer">
                   <Link href="/certificates" className="flex items-center">
                     <Award className="mr-3 h-4 w-4" />
                     {t('certificates')}
@@ -207,10 +193,7 @@ export function Navbar() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-white/5" />
-                <DropdownMenuItem 
-                  onClick={handleLogout}
-                  className="rounded-xl font-bold uppercase text-[10px] tracking-widest p-3 mb-1 mt-1 text-rose-500 hover:bg-rose-500/10 hover:text-rose-500 cursor-pointer"
-                >
+                <DropdownMenuItem onClick={handleLogout} className="rounded-xl font-bold uppercase text-[10px] tracking-widest p-3 mb-1 mt-1 text-rose-500 hover:bg-rose-500/10 hover:text-rose-500 cursor-pointer">
                   <LogOut className="mr-3 h-4 w-4" />
                   Logout
                 </DropdownMenuItem>

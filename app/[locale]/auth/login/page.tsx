@@ -2,20 +2,20 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Link, useRouter } from '@/i18n/routing'
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Shield, Mail, Lock, ArrowRight, Loader2, Github, Chrome } from 'lucide-react'
+import { Shield, Mail, Lock, ArrowRight, Loader2 } from 'lucide-react'
 import { useWallet } from '@solana/wallet-adapter-react'
+import {
+  WALLET_AUTH_MESSAGE,
+  walletToEmail,
+  signatureToPassword,
+  isInvalidCredentialsError
+} from '@/lib/wallet-auth'
 
 const DEMO_EMAIL = process.env.NEXT_PUBLIC_DEMO_EMAIL || 'demo@example.com'
 const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD || 'demo1234'
@@ -27,7 +27,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
   const t = useTranslations('Auth')
-  const { signMessage, connected } = useWallet()
+  const { signMessage, connected, publicKey } = useWallet()
 
   useEffect(() => {
     const checkUser = async () => {
@@ -53,16 +53,70 @@ export default function LoginPage() {
       })
       if (error) throw error
       router.push('/dashboard')
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred')
+    } catch (loginError: unknown) {
+      setError(loginError instanceof Error ? loginError.message : 'An error occurred')
     } finally {
       setIsLoading(false)
     }
   }
 
+  const handleWalletAuth = async () => {
+    setError(null)
+    if (!connected || !signMessage || !publicKey) {
+      setError('Connect your wallet to continue')
+      return
+    }
+
+    const supabase = createClient()
+    const encoder = new TextEncoder()
+    const signature = await signMessage(encoder.encode(WALLET_AUTH_MESSAGE))
+    const wallet = publicKey.toString()
+    const walletEmail = walletToEmail(wallet)
+    const walletPassword = signatureToPassword(signature)
+
+    const loginRes = await supabase.auth.signInWithPassword({
+      email: walletEmail,
+      password: walletPassword
+    })
+
+    if (loginRes.error && isInvalidCredentialsError(loginRes.error.message)) {
+      const signupRes = await supabase.auth.signUp({
+        email: walletEmail,
+        password: walletPassword,
+        options: {
+          data: { wallet_address: wallet }
+        }
+      })
+      if (signupRes.error) throw signupRes.error
+
+      const retry = await supabase.auth.signInWithPassword({
+        email: walletEmail,
+        password: walletPassword
+      })
+      if (retry.error) throw retry.error
+    } else if (loginRes.error) {
+      throw loginRes.error
+    }
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          wallet_address: wallet,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id)
+      if (updateError && !updateError.message.toLowerCase().includes('duplicate')) {
+        throw updateError
+      }
+    }
+
+    router.push('/dashboard')
+  }
+
   return (
     <div className="flex min-h-screen w-full items-center justify-center p-6 md:p-10 bg-background relative overflow-hidden">
-      {/* Background Decorations */}
       <div className="absolute top-0 left-0 w-full h-full -z-10">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 rounded-full blur-[120px]" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/10 rounded-full blur-[120px]" />
@@ -104,9 +158,7 @@ export default function LoginPage() {
                     </div>
                   </div>
                   <div className="grid gap-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="password">{t('passwordLabel')}</Label>
-                    </div>
+                    <Label htmlFor="password">{t('passwordLabel')}</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                       <Input
@@ -127,9 +179,9 @@ export default function LoginPage() {
                   </div>
                 )}
 
-                <Button 
-                  type="submit" 
-                  className="w-full h-11 text-base font-bold rounded-xl shadow-[0_0_20px_rgba(20,241,149,0.1)] hover:shadow-[0_0_30px_rgba(20,241,149,0.2)] transition-all" 
+                <Button
+                  type="submit"
+                  className="w-full h-11 text-base font-bold rounded-xl shadow-[0_0_20px_rgba(20,241,149,0.1)] hover:shadow-[0_0_30px_rgba(20,241,149,0.2)] transition-all"
                   disabled={isLoading}
                 >
                   {isLoading ? (
@@ -144,65 +196,16 @@ export default function LoginPage() {
                     </>
                   )}
                 </Button>
-                
-                <div className="grid grid-cols-2 gap-3">
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  className="h-11 rounded-xl" 
-                  onClick={async () => {
-                    const supabase = createClient()
-                    setError(null)
-                    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}` } })
-                    if (error) {
-                      setError(error.message)
-                    }
-                  }}
-                >
-                    <Chrome className="mr-2 h-4 w-4" />
-                    Google
-                  </Button>
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    className="h-11 rounded-xl" 
-                    onClick={async () => {
-                      const supabase = createClient()
-                      setError(null)
-                      const { error } = await supabase.auth.signInWithOAuth({ provider: 'github', options: { redirectTo: `${location.origin}${location.pathname}` } })
-                      if (error) {
-                        setError(error.message)
-                      }
-                    }}
-                  >
-                    <Github className="mr-2 h-4 w-4" />
-                    GitHub
-                  </Button>
-                </div>
-                
+
                 <Button
                   type="button"
                   variant="default"
                   className="w-full h-11 rounded-xl"
                   onClick={async () => {
-                    const supabase = createClient()
-                    setError(null)
-                    const { data: { user } } = await supabase.auth.getUser()
-                    if (!connected || !signMessage) {
-                      setError('Connect your wallet to continue')
-                      return
-                    }
-                    const encoder = new TextEncoder()
-                    const message = encoder.encode(`Sign in with wallet • ${new Date().toISOString()}`)
                     try {
-                      await signMessage(message)
-                      if (user) {
-                        router.push('/dashboard')
-                        return
-                      }
-                      router.push('/auth/sign-up?wallet=1')
-                    } catch {
-                      setError('Wallet signature failed')
+                      await handleWalletAuth()
+                    } catch (walletError: unknown) {
+                      setError(walletError instanceof Error ? walletError.message : 'Wallet sign in failed')
                     }
                   }}
                 >
@@ -224,8 +227,8 @@ export default function LoginPage() {
                       })
                       if (error) throw error
                       router.push('/dashboard')
-                    } catch (error: unknown) {
-                      setError(error instanceof Error ? error.message : 'Demo login failed')
+                    } catch (demoError: unknown) {
+                      setError(demoError instanceof Error ? demoError.message : 'Demo login failed')
                     } finally {
                       setIsLoading(false)
                     }
@@ -251,4 +254,3 @@ export default function LoginPage() {
     </div>
   )
 }
-

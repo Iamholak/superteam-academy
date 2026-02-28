@@ -2,19 +2,15 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-} from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Link, useRouter } from '@/i18n/routing'
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { UserPlus, Mail, Lock, ArrowRight, Loader2, Github, Chrome } from 'lucide-react'
+import { UserPlus, Mail, Lock, ArrowRight, Loader2 } from 'lucide-react'
 import { useWallet } from '@solana/wallet-adapter-react'
-
-const PENDING_WALLET_SIGNUP_KEY = 'pending_wallet_signup_address'
+import { WALLET_AUTH_MESSAGE, walletToEmail, signatureToPassword } from '@/lib/wallet-auth'
 
 export default function SignUpPage() {
   const [email, setEmail] = useState('')
@@ -31,27 +27,9 @@ export default function SignUpPage() {
     const checkUser = async () => {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        return
+      if (user) {
+        router.replace('/dashboard')
       }
-
-      const params = new URLSearchParams(window.location.search)
-      const isWalletSignupFlow = params.get('wallet') === '1'
-      const pendingWalletAddress = localStorage.getItem(PENDING_WALLET_SIGNUP_KEY)
-
-      if (isWalletSignupFlow && pendingWalletAddress) {
-        await supabase
-          .from('profiles')
-          .update({
-            wallet_address: pendingWalletAddress,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id)
-
-        localStorage.removeItem(PENDING_WALLET_SIGNUP_KEY)
-      }
-
-      router.replace('/dashboard')
     }
 
     checkUser()
@@ -81,14 +59,14 @@ export default function SignUpPage() {
       })
       if (error) throw error
       router.push('/auth/sign-up-success')
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred')
+    } catch (signUpError: unknown) {
+      setError(signUpError instanceof Error ? signUpError.message : 'An error occurred')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleWalletGoogleSignup = async () => {
+  const handleWalletSignup = async () => {
     if (!connected || !signMessage || !publicKey) {
       setError('Connect your wallet to continue')
       return
@@ -97,26 +75,55 @@ export default function SignUpPage() {
     setError(null)
     setIsWalletLoading(true)
 
-    const encoder = new TextEncoder()
-    const message = encoder.encode(`Create account with wallet + Gmail - ${new Date().toISOString()}`)
-
     try {
-      await signMessage(message)
-
-      localStorage.setItem(PENDING_WALLET_SIGNUP_KEY, publicKey.toString())
-
       const supabase = createClient()
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
+      const encoder = new TextEncoder()
+      const signature = await signMessage(encoder.encode(WALLET_AUTH_MESSAGE))
+      const wallet = publicKey.toString()
+      const walletEmail = walletToEmail(wallet)
+      const walletPassword = signatureToPassword(signature)
+
+      const signupRes = await supabase.auth.signUp({
+        email: walletEmail,
+        password: walletPassword,
         options: {
-          redirectTo: `${location.origin}${location.pathname}?wallet=1`,
-        },
+          data: { wallet_address: wallet }
+        }
       })
 
-      if (error) throw error
+      if (signupRes.error) {
+        // If user already exists, login directly with same deterministic credentials.
+        const loginRes = await supabase.auth.signInWithPassword({
+          email: walletEmail,
+          password: walletPassword
+        })
+        if (loginRes.error) throw loginRes.error
+      } else {
+        const loginRes = await supabase.auth.signInWithPassword({
+          email: walletEmail,
+          password: walletPassword
+        })
+        if (loginRes.error) throw loginRes.error
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({
+            wallet_address: wallet,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', user.id)
+        if (updateError && !updateError.message.toLowerCase().includes('duplicate')) {
+          throw updateError
+        }
+      }
+
+      router.push('/dashboard')
     } catch (walletError: unknown) {
       setError(walletError instanceof Error ? walletError.message : 'Wallet sign-up failed')
-      localStorage.removeItem(PENDING_WALLET_SIGNUP_KEY)
+    } finally {
       setIsWalletLoading(false)
     }
   }
@@ -193,27 +200,22 @@ export default function SignUpPage() {
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">
-                    Wallet sign-up requires linking Google (Gmail).
-                  </p>
-                  <Button
-                    type="button"
-                    variant="default"
-                    className="w-full h-11 rounded-xl"
-                    onClick={handleWalletGoogleSignup}
-                    disabled={isWalletLoading}
-                  >
-                    {isWalletLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Linking Gmail...
-                      </>
-                    ) : (
-                      'Sign up with Wallet + Gmail'
-                    )}
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  variant="default"
+                  className="w-full h-11 rounded-xl"
+                  onClick={handleWalletSignup}
+                  disabled={isWalletLoading}
+                >
+                  {isWalletLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating wallet account...
+                    </>
+                  ) : (
+                    'Sign up with Wallet'
+                  )}
+                </Button>
 
                 {error && (
                   <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm font-medium">
@@ -238,33 +240,6 @@ export default function SignUpPage() {
                     </>
                   )}
                 </Button>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 rounded-xl"
-                    onClick={async () => {
-                      const supabase = createClient()
-                      await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}` } })
-                    }}
-                  >
-                    <Chrome className="mr-2 h-4 w-4" />
-                    Google
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 rounded-xl"
-                    onClick={async () => {
-                      const supabase = createClient()
-                      await supabase.auth.signInWithOAuth({ provider: 'github', options: { redirectTo: `${location.origin}${location.pathname}` } })
-                    }}
-                  >
-                    <Github className="mr-2 h-4 w-4" />
-                    GitHub
-                  </Button>
-                </div>
 
                 <div className="text-center text-sm">
                   <span className="text-muted-foreground">{t('hasAccount')}</span>{' '}

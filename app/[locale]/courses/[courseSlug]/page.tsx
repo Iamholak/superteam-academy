@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Clock, BookOpen, Award, CheckCircle2, ArrowRight, Star, Trophy, PlayCircle, ShieldCheck } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { blocksToHtml } from '@/lib/utils/portableText';
+import { createClient } from '@/lib/supabase/server';
 
 interface CoursePageProps {
   params: Promise<{ locale: string; courseSlug: string }>;
@@ -26,6 +27,62 @@ export default async function CoursePage({ params }: CoursePageProps) {
   const lessons = await courseService.getMergedCourseLessons(course.slug, course.id);
   const firstLesson = lessons[0];
   const firstLessonLink = firstLesson ? `/courses/${course.slug}/lessons/${firstLesson.slug || firstLesson.id}` : '#';
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const resolvedCourseId =
+    await courseService.resolveCourseId(course.id) ||
+    await courseService.resolveCourseId(course.slug);
+
+  let isEnrolled = false;
+  let completedCount = 0;
+  let unlockedLessonIndex = -1;
+  if (user && resolvedCourseId) {
+    const allEnrollments = await courseService.getUserEnrollments(user.id);
+    const enrollment = await courseService.getUserEnrollment(user.id, resolvedCourseId)
+      || allEnrollments.find((e: any) => e.course_id === resolvedCourseId)
+      || allEnrollments.find((e: any) => e.courses?.slug === course.slug);
+    isEnrolled = Boolean(enrollment);
+    if (isEnrolled) {
+      const { data: completionRows } = await supabase
+        .from('lesson_completions')
+        .select('lesson_id, lessons(slug)')
+        .eq('user_id', user.id)
+        .eq('enrollment_id', (enrollment as any).id);
+
+      const completedIds = new Set<string>();
+      const completedSlugs = new Set<string>();
+      for (const row of completionRows || []) {
+        if ((row as any)?.lesson_id) {
+          completedIds.add((row as any).lesson_id);
+        }
+        const lessonRef = Array.isArray((row as any).lessons)
+          ? (row as any).lessons[0]
+          : (row as any).lessons;
+        if (lessonRef?.slug) {
+          completedSlugs.add(lessonRef.slug);
+        }
+      }
+
+      const isLessonCompleted = (candidate: { id: string; slug?: string }) =>
+        completedIds.has(candidate.id) || Boolean(candidate.slug && completedSlugs.has(candidate.slug));
+
+      completedCount = lessons.filter((lesson) => isLessonCompleted(lesson)).length;
+      unlockedLessonIndex = Math.max(lessons.length - 1, 0);
+      for (let index = 0; index < lessons.length; index += 1) {
+        if (!isLessonCompleted(lessons[index])) {
+          unlockedLessonIndex = index;
+          break;
+        }
+      }
+    }
+  }
+
+  unlockedLessonIndex = !isEnrolled ? -1 : unlockedLessonIndex;
+  const unlockedLesson = unlockedLessonIndex >= 0 ? lessons[unlockedLessonIndex] : null;
+  const startLessonLink = unlockedLesson
+    ? `/courses/${course.slug}/lessons/${unlockedLesson.slug || unlockedLesson.id}`
+    : firstLessonLink;
 
   const longDescriptionHtml = Array.isArray(course.long_description) 
     ? blocksToHtml(course.long_description) 
@@ -98,8 +155,16 @@ export default async function CoursePage({ params }: CoursePageProps) {
               <div className="flex flex-col sm:flex-row gap-4 pt-4">
                 <EnrollButton
                   courseId={course.id}
-                  firstLessonHref={firstLessonLink as any}
-                  label={t('startCourse')}
+                  courseSlug={course.slug}
+                  firstLessonHref={startLessonLink as any}
+                  label={
+                    !user
+                      ? 'Sign in to Start'
+                      : isEnrolled
+                        ? t('continueCourse')
+                        : t('startCourse')
+                  }
+                  isEnrolled={isEnrolled}
                 />
                 <div className="flex items-center gap-4 px-6 py-3 rounded-xl bg-card/50 border border-border/50 backdrop-blur-md">
                   <div className="flex items-center gap-1.5">
@@ -148,35 +213,58 @@ export default async function CoursePage({ params }: CoursePageProps) {
                 <h2 className="text-3xl font-bold tracking-tight">{t('curriculum')}</h2>
               </div>
               
-              <div className="grid gap-4">
+              <div className="grid max-h-[70vh] gap-4 overflow-y-auto pr-1">
                 {lessons.length > 0 ? (
                   lessons.map((lesson, index) => (
-                    <Link
-                      key={lesson.id}
-                      href={`/courses/${course.slug}/lessons/${lesson.slug || lesson.id}` as any}
-                      className="group flex items-center gap-6 rounded-2xl border border-border/50 bg-card/30 p-5 transition-all hover:bg-card/50 hover:border-primary/30 hover:shadow-lg"
-                    >
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-lg font-bold text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-all">
-                        {index + 1}
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <p className="font-bold text-lg group-hover:text-primary transition-colors">{lesson.title}</p>
-                        <p className="text-sm text-muted-foreground line-clamp-1">
-                          {lesson.description}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        {lesson.duration_minutes && (
-                          <span className="text-sm font-medium text-muted-foreground">{lesson.duration_minutes}m</span>
-                        )}
-                        <Badge variant="outline" className="capitalize bg-white/5 border-white/10">
-                          {lesson.lesson_type}
-                        </Badge>
-                        <div className="h-8 w-8 flex items-center justify-center rounded-full bg-muted/50 group-hover:bg-primary/20 group-hover:text-primary transition-all">
-                          <PlayCircle className="h-5 w-5" />
-                        </div>
-                      </div>
-                    </Link>
+                    (() => {
+                      const isUnlocked = isEnrolled && index <= unlockedLessonIndex;
+                      const className = isUnlocked
+                        ? 'group flex items-center gap-6 rounded-2xl border border-border/50 bg-card/30 p-5 transition-all hover:bg-card/50 hover:border-primary/30 hover:shadow-lg'
+                        : 'group flex items-center gap-6 rounded-2xl border border-border/50 bg-card/20 p-5 opacity-60';
+
+                      const content = (
+                        <>
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-lg font-bold text-primary">
+                            {index + 1}
+                          </div>
+                          <div className="flex-1 space-y-1">
+                            <p className="font-bold text-lg">{lesson.title}</p>
+                            <p className="text-sm text-muted-foreground line-clamp-1">
+                              {lesson.description}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            {lesson.duration_minutes && (
+                              <span className="text-sm font-medium text-muted-foreground">{lesson.duration_minutes}m</span>
+                            )}
+                            <Badge variant="outline" className="capitalize bg-white/5 border-white/10">
+                              {lesson.lesson_type}
+                            </Badge>
+                            <div className="h-8 w-8 flex items-center justify-center rounded-full bg-muted/50">
+                              {isUnlocked ? <PlayCircle className="h-5 w-5" /> : <ShieldCheck className="h-4 w-4" />}
+                            </div>
+                          </div>
+                        </>
+                      );
+
+                      if (!isUnlocked) {
+                        return (
+                          <div key={lesson.id} className={className}>
+                            {content}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <Link
+                          key={lesson.id}
+                          href={`/courses/${course.slug}/lessons/${lesson.slug || lesson.id}` as any}
+                          className={className}
+                        >
+                          {content}
+                        </Link>
+                      );
+                    })()
                   ))
                 ) : (
                   <Card className="border-dashed bg-transparent">
@@ -279,8 +367,16 @@ export default async function CoursePage({ params }: CoursePageProps) {
                 </p>
                 <EnrollButton
                   courseId={course.id}
-                  firstLessonHref={firstLessonLink as any}
-                  label={t('startCourse')}
+                  courseSlug={course.slug}
+                  firstLessonHref={startLessonLink as any}
+                  label={
+                    !user
+                      ? 'Sign in to Start'
+                      : isEnrolled
+                        ? t('continueCourse')
+                        : t('startCourse')
+                  }
+                  isEnrolled={isEnrolled}
                   className="w-full"
                 />
               </CardContent>

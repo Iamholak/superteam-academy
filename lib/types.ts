@@ -167,6 +167,31 @@ export interface Credential {
   metadata_uri?: string
 }
 
+export interface CourseCertificate {
+  id: string
+  user_id: string
+  course_id: string
+  lesson_completion_id?: string
+  wallet_address: string
+  mint_address: string
+  signature: string
+  network: string
+  metadata_uri?: string
+  issued_at: string
+  courses?: Course
+}
+
+export interface CompleteLessonResult {
+  completed: boolean
+  progressPercentage: number
+  courseCompleted: boolean
+  certificate?: {
+    mintAddress: string
+    signature: string
+  }
+  certificateError?: string
+}
+
 export interface Instructor {
   id: string
   name: string

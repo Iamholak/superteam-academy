@@ -11,7 +11,7 @@ export class SanityService {
       console.warn('[v0] Sanity not configured: NEXT_PUBLIC_SANITY_PROJECT_ID/NEXT_PUBLIC_SANITY_DATASET missing');
       return [];
     }
-    const query = `*[_type == "course"]{
+    const query = `*[_type == "course" && defined(slug.current)] | order(_updatedAt desc){
       _id,
       title,
       "slug": slug.current,
@@ -22,7 +22,12 @@ export class SanityService {
       "duration_minutes": coalesce(estimatedHours,0)*60,
       "published": coalesce(isPublished,false)
     }`;
-    return await sanityClient.fetch(query);
+    try {
+      return await sanityClient.fetch(query);
+    } catch (error) {
+      console.error('[SanityService] Failed to fetch courses:', error);
+      return [];
+    }
   }
 
   /**
@@ -76,7 +81,12 @@ export class SanityService {
         }
       }
     }`;
-    return await sanityClient.fetch(query, { slug });
+    try {
+      return await sanityClient.fetch(query, { slug });
+    } catch (error) {
+      console.error('[SanityService] Failed to fetch course by slug:', { slug, error });
+      return null;
+    }
   }
 }
 
