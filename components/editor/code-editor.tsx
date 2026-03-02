@@ -36,12 +36,10 @@ export function CodeEditor({
 
   const handleRun = async () => {
     if (!onRun) {
-      setIsRunning(true)
-      // Mock run
-      setTimeout(() => {
-        setResult({ success: true, output: 'Success! Program compiled and executed on Solana Devnet (Simulated).' })
-        setIsRunning(false)
-      }, 1500)
+      setResult({
+        success: false,
+        output: 'No challenge runner configured for this lesson yet. Connect a backend runner to enable execution.'
+      })
       return
     }
 

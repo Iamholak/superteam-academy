@@ -108,15 +108,15 @@ export default function SignUpPage() {
 
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({
-            wallet_address: wallet,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', user.id)
-        if (updateError && !updateError.message.toLowerCase().includes('duplicate')) {
-          throw updateError
+        const linkRes = await fetch('/api/wallet/link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ walletAddress: wallet })
+        })
+        const linkPayload = await linkRes.json().catch(() => ({}))
+        if (!linkRes.ok && !String(linkPayload?.error || '').toLowerCase().includes('already linked')) {
+          throw new Error(linkPayload?.error || 'Failed to link wallet')
         }
       }
 

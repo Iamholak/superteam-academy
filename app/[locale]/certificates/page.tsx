@@ -218,6 +218,9 @@ export default function CertificatesPage() {
                     <ExternalLink className="ml-2 h-4 w-4" />
                   </a>
                 </Button>
+                <Button asChild variant="ghost" className="w-full rounded-lg">
+                  <Link href={`/certificates/${cert.id}`}>View Details</Link>
+                </Button>
               </div>
             </article>
           ))}

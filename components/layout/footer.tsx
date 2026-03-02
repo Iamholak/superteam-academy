@@ -51,6 +51,10 @@ export function Footer() {
             <a href="https://discord.gg/superteam" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">Discord</a>
             <a href="https://github.com/superteamdao" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">GitHub</a>
           </div>
+          <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest">
+            <Link href="/privacy-policy" className="text-muted-foreground hover:text-primary transition-colors">Privacy Policy</Link>
+            <Link href="/terms-and-conditions" className="text-muted-foreground hover:text-primary transition-colors">Terms & Conditions</Link>
+          </div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
             &copy; {new Date().getFullYear()} Superteam Brazil
           </p>

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { OnChainStats } from '@/components/dashboard/on-chain-stats';
 import { DailyCheckIn } from '@/components/dashboard/daily-check-in';
+import { ActivityCalendar } from '@/components/dashboard/activity-calendar';
 import {
   ArrowRight,
   Flame,
@@ -29,17 +30,6 @@ function levelRange(level: number) {
   return { min, max };
 }
 
-function mapHeatmap(cells: HeatCell[]) {
-  const max = Math.max(1, ...cells.map((c) => c.count));
-  return cells.map((cell) => {
-    const intensity = Math.min(1, cell.count / max);
-    return {
-      ...cell,
-      intensity
-    };
-  });
-}
-
 export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const supabase = await createClient();
@@ -60,7 +50,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
     courseService.getCourses()
   ]);
 
-  const days = 28;
+  const days = 365;
   const start = new Date();
   start.setDate(start.getDate() - (days - 1));
   const startIso = start.toISOString();
@@ -81,6 +71,8 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
   const lastActivityDay = progress?.last_activity_date
     ? new Date(progress.last_activity_date).toISOString().slice(0, 10)
     : null;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const checkedInToday = lastActivityDay === todayKey;
   if (lastActivityDay && !byDay.has(lastActivityDay)) {
     byDay.set(lastActivityDay, 1);
   }
@@ -91,7 +83,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
     const key = d.toISOString().slice(0, 10);
     return { date: key, count: byDay.get(key) || 0 };
   });
-  const heatmap = mapHeatmap(heatCells);
+  const activityRecords = heatCells.filter((cell) => cell.count > 0);
 
   const activeEnrollments = enrollments.filter((e: any) => (e.progress_percentage || 0) < 100);
   const activeEnrollmentIds = activeEnrollments.map((e: any) => e.id);
@@ -154,7 +146,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <DailyCheckIn />
+              <DailyCheckIn alreadyCheckedIn={checkedInToday} />
               <OnChainStats />
             </div>
           </div>
@@ -252,24 +244,12 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           </div>
 
           <div className="space-y-6">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-              <p className="mb-3 text-xl font-black">Activity</p>
-              <p className="mb-5 text-sm text-muted-foreground">
-                <span className="font-black text-orange-400">{streak}</span> day streak
-              </p>
-              <div className="grid grid-cols-7 gap-1.5">
-                {heatmap.map((cell) => (
-                  <div
-                    key={cell.date}
-                    className="h-4 rounded-sm border border-white/5"
-                    style={{
-                      backgroundColor: `rgba(168,85,247,${cell.intensity * 0.65})`
-                    }}
-                    title={`${cell.date}: ${cell.count} completions`}
-                  />
-                ))}
-              </div>
-            </div>
+            <ActivityCalendar
+              records={activityRecords}
+              streak={streak}
+              checkedInToday={checkedInToday}
+              lastActivityDay={lastActivityDay}
+            />
 
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
               <div className="mb-4 flex items-center justify-between">

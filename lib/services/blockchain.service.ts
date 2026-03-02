@@ -54,37 +54,40 @@ export class BlockchainService {
    */
   async getUserCredentials(walletAddress: string): Promise<Credential[]> {
     try {
-      // In a real implementation, we would use Helius or Metaplex DAS API
-      // For the MVP, we simulate the fetch with a small delay
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      return [
-        {
-          id: '1',
-          type: 'learning_track',
-          title: 'Solana Developer Track',
-          description: 'Evolving credential tracking your progress through the Solana Developer curriculum. Level 2: Intermediate.',
-          imageUrl: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?q=80&w=2832&auto=format&fit=crop',
-          metadata: {
-            trackId: 'solana-dev',
-            trackLevel: 2,
-            isUpgradable: true,
-            earnedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-            mint: '7nEneGpzY87y8S8991Yc3V8992Yc3V8993Yc3V8994Yc'
-          }
-        },
-        {
-          id: '2',
-          type: 'achievement',
-          title: 'Early Builder Badge',
-          description: 'Awarded to early participants of the Superteam Academy program.',
-          imageUrl: 'https://images.unsplash.com/photo-1640341719941-47700028189c?q=80&w=2832&auto=format&fit=crop',
-          metadata: {
-            earnedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-            mint: '3mBbeGpzY87y8S8991Yc3V8992Yc3V8993Yc3V8994Yc'
-          }
+      const owner = new PublicKey(walletAddress);
+      const tokenProgram = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+      const token2022Program = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
+      const [splAccounts, token2022Accounts] = await Promise.all([
+        this.connection.getParsedTokenAccountsByOwner(owner, { programId: tokenProgram }),
+        this.connection.getParsedTokenAccountsByOwner(owner, { programId: token2022Program })
+      ]);
+
+      const allAccounts = [...splAccounts.value, ...token2022Accounts.value];
+      const nftLike = allAccounts
+        .map((account: any) => {
+          const info = account.account.data.parsed?.info;
+          const tokenAmount = info?.tokenAmount;
+          return {
+            mint: info?.mint as string | undefined,
+            amount: Number(tokenAmount?.amount || 0),
+            decimals: Number(tokenAmount?.decimals || 0)
+          };
+        })
+        .filter((item) => item.mint && item.amount > 0 && item.decimals === 0)
+        .slice(0, 20);
+
+      return nftLike.map((item, index) => ({
+        id: item.mint!,
+        type: 'course_completion',
+        title: `On-Chain Credential #${index + 1}`,
+        description: 'Credential detected from wallet holdings on Devnet.',
+        imageUrl: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?q=80&w=2832&auto=format&fit=crop',
+        metadata: {
+          earnedAt: new Date().toISOString(),
+          mint: item.mint!
         }
-      ];
+      }));
     } catch (error) {
       console.error('[v0] Error fetching credentials:', error);
       return [];
@@ -96,11 +99,26 @@ export class BlockchainService {
    */
   async getXPBalance(walletAddress: string): Promise<number> {
     try {
-      // In a real implementation, we would fetch the Token-2022 balance
-      // for the specific XP mint address.
-      // For the MVP, we return a mock value that would come from on-chain.
-      console.log('[v0] Fetching on-chain XP for:', walletAddress);
-      return 750; // Mock balance
+      const mintAddress =
+        process.env.NEXT_PUBLIC_XP_MINT_ADDRESS ||
+        process.env.XP_TOKEN_MINT_ADDRESS;
+      if (!mintAddress) {
+        return 0;
+      }
+
+      const owner = new PublicKey(walletAddress);
+      const mint = new PublicKey(mintAddress);
+      const { value } = await this.connection.getParsedTokenAccountsByOwner(owner, { mint });
+
+      let total = 0;
+      for (const account of value) {
+        const amount = Number(
+          account.account.data.parsed?.info?.tokenAmount?.uiAmount || 0
+        );
+        total += amount;
+      }
+
+      return Math.floor(total);
     } catch (error) {
       console.error('[v0] Error fetching XP balance:', error);
       return 0;
@@ -389,8 +407,7 @@ export class BlockchainService {
    * For MVP, this will read from Supabase instead
    */
   async getUserXP(walletAddress: string): Promise<number> {
-    console.log('[v0] Fetching user XP (stubbed):', walletAddress);
-    return 0; // Will be fetched from Supabase user_progress table
+    return this.getXPBalance(walletAddress);
   }
 
   /**

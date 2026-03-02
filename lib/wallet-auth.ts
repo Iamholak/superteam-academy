@@ -1,11 +1,14 @@
 export const WALLET_AUTH_MESSAGE = 'Superteam Academy wallet auth v1'
 
 export function walletToEmail(walletAddress: string): string {
-  return `${walletAddress.toLowerCase()}@wallet.superteam.local`
+  // Must be a standards-compliant domain for Supabase Auth validation.
+  return `${walletAddress.toLowerCase()}@wallet.superteamacademy.app`
 }
 
 export function signatureToPassword(signature: Uint8Array): string {
-  const hex = Array.from(signature)
+  // Supabase password hashing (bcrypt) rejects values longer than 72 chars.
+  // Use a deterministic 32-byte prefix of the signature => 64 hex chars + prefix.
+  const hex = Array.from(signature.slice(0, 32))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
   return `wa_${hex}`

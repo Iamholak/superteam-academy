@@ -37,6 +37,20 @@ export default function SettingsPage() {
   const [linkedGoogle, setLinkedGoogle] = useState(false)
   const [linkedGithub, setLinkedGithub] = useState(false)
 
+  const linkWalletWithApi = async (walletAddress: string): Promise<{ ok: boolean; message?: string }> => {
+    const response = await fetch('/api/wallet/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ walletAddress })
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      return { ok: false, message: payload?.error || 'Failed to link wallet' }
+    }
+    return { ok: true }
+  }
+
   useEffect(() => {
     async function loadProfile() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -64,10 +78,13 @@ export default function SettingsPage() {
     async function linkWalletAuto() {
       const { data: { user } } = await supabase.auth.getUser()
       if (connected && publicKey && user) {
-        await supabase
-          .from('profiles')
-          .update({ wallet_address: publicKey.toString(), updated_at: new Date().toISOString() })
-          .eq('id', user.id)
+        const result = await linkWalletWithApi(publicKey.toString())
+        if (!result.ok) {
+          if ((result.message || '').toLowerCase().includes('already linked to another user')) {
+            setStatus({ type: 'error', message: 'This wallet is already linked to another account.' })
+          }
+          return
+        }
         const updated = await userClientService.getProfile(user.id)
         if (updated) setProfile(updated)
       }
@@ -296,21 +313,25 @@ export default function SettingsPage() {
                         </Button>
                       </>
                     ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="rounded-xl"
-                        onClick={async () => {
-                          const { data: { user } } = await supabase.auth.getUser()
-                          if (!user || !publicKey) return
-                          await supabase
-                            .from('profiles')
-                            .update({ wallet_address: publicKey.toString(), updated_at: new Date().toISOString() })
-                            .eq('id', user.id)
-                          const updated = await userClientService.getProfile(user.id)
-                          if (updated) setProfile(updated)
-                        }}
-                      >
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="rounded-xl"
+                          onClick={async () => {
+                            const { data: { user } } = await supabase.auth.getUser()
+                            if (!user || !publicKey) return
+                            const result = await linkWalletWithApi(publicKey.toString())
+                            if (!result.ok) {
+                              setStatus({ type: 'error', message: result.message || 'Failed to link wallet' })
+                              return
+                            }
+                            const updated = await userClientService.getProfile(user.id)
+                            if (updated) {
+                              setProfile(updated)
+                              setStatus({ type: 'success', message: 'Wallet linked successfully' })
+                            }
+                          }}
+                        >
                         <LinkIcon className="mr-2 h-4 w-4" />
                         Link Connected Wallet
                       </Button>

@@ -1,21 +1,23 @@
-/**
- * Analytics Service - Production-ready analytics tracking
- * 
- * Supports:
- * - PostHog (Events & Heatmaps)
- * - GA4 (Page Views)
- * - Sentry (Error Monitoring)
- */
+type AnalyticsPayload = Record<string, unknown>;
+
+declare global {
+  interface Window {
+    gtag?: (...args: unknown[]) => void;
+    posthog?: {
+      capture?: (event: string, properties?: AnalyticsPayload) => void;
+      identify?: (userId: string, traits?: AnalyticsPayload) => void;
+    };
+    clarity?: (command: string, ...args: unknown[]) => void;
+    Sentry?: {
+      captureException?: (error: Error, context?: { extra?: AnalyticsPayload }) => void;
+    };
+  }
+}
 
 export class AnalyticsService {
   private static instance: AnalyticsService;
-  private isInitialized = false;
-
-  private constructor() {
-    // In a real app, you would initialize PostHog/GA here
-    this.isInitialized = true;
-    console.log('[v0] Analytics initialized');
-  }
+  private isBrowser = typeof window !== 'undefined';
+  private gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 
   public static getInstance(): AnalyticsService {
     if (!AnalyticsService.instance) {
@@ -24,42 +26,40 @@ export class AnalyticsService {
     return AnalyticsService.instance;
   }
 
-  /**
-   * Track user events (e.g., lesson completion, enrollment)
-   */
-  trackEvent(event: string, properties?: Record<string, any>) {
-    if (!this.isInitialized) return;
-    
-    // REAL: posthog.capture(event, properties)
-    console.log(`[v0] [Analytics] Event: ${event}`, properties);
+  trackEvent(event: string, properties: AnalyticsPayload = {}) {
+    if (!this.isBrowser) return;
+    window.posthog?.capture?.(event, properties);
+    window.gtag?.('event', event, properties);
+    window.clarity?.('event', event);
   }
 
-  /**
-   * Identify user for better tracking
-   */
-  identify(userId: string, traits?: Record<string, any>) {
-    if (!this.isInitialized) return;
-    
-    // REAL: posthog.identify(userId, traits)
-    console.log(`[v0] [Analytics] Identify: ${userId}`, traits);
+  identify(userId: string, traits: AnalyticsPayload = {}) {
+    if (!this.isBrowser) return;
+    window.posthog?.identify?.(userId, traits);
+    window.gtag?.('set', 'user_properties', traits);
+    window.clarity?.('identify', userId);
   }
 
-  /**
-   * Track page views
-   */
   trackPageView(url: string) {
-    if (!this.isInitialized) return;
-    
-    // REAL: posthog.capture('$pageview') or gtag('config', 'GA_MEASUREMENT_ID', { page_path: url })
-    console.log(`[v0] [Analytics] PageView: ${url}`);
+    if (!this.isBrowser) return;
+
+    window.posthog?.capture?.('$pageview', { path: url });
+    if (this.gaId) {
+      window.gtag?.('config', this.gaId, {
+        page_path: url
+      });
+    }
   }
 
-  /**
-   * Log errors to Sentry
-   */
-  logError(error: Error, context?: Record<string, any>) {
-    // REAL: Sentry.captureException(error, { extra: context })
-    console.error(`[v0] [Analytics] Error: ${error.message}`, context);
+  logError(error: Error, context: AnalyticsPayload = {}) {
+    if (!this.isBrowser) return;
+    window.Sentry?.captureException?.(error, { extra: context });
+    window.posthog?.capture?.('client_error', {
+      message: error.message,
+      stack: error.stack,
+      ...context
+    });
+    console.error('[Analytics] Error:', error.message, context);
   }
 }
 

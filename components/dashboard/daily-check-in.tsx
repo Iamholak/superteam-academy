@@ -4,9 +4,13 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useRouter } from '@/i18n/routing'
 
-export function DailyCheckIn() {
+interface DailyCheckInProps {
+  alreadyCheckedIn?: boolean
+}
+
+export function DailyCheckIn({ alreadyCheckedIn = false }: DailyCheckInProps) {
   const [loading, setLoading] = useState(false)
-  const [done, setDone] = useState(false)
+  const [done, setDone] = useState(alreadyCheckedIn)
   const router = useRouter()
 
   const handleCheckIn = async () => {

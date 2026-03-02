@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Languages, User, Settings, Award, LayoutDashboard, LogOut, BookOpen, Trophy, FolderOpen } from 'lucide-react';
+import { Languages, User, Settings, Award, LayoutDashboard, LogOut, BookOpen, Trophy, FolderOpen, ShieldCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useEffect, useState } from 'react';
 import { User as SupabaseUser } from '@supabase/supabase-js';
@@ -66,6 +66,10 @@ export function Navbar() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         console.warn('[v0] Failed to link wallet to profile:', payload?.error || response.statusText);
+        if (response.status === 409) {
+          // Avoid repeated conflict spam while connected with same wallet.
+          setLastLinkedWallet(walletAddr);
+        }
         return;
       }
       setLastLinkedWallet(walletAddr);
@@ -86,7 +90,7 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
-      <div className="container flex h-14 items-center justify-between">
+      <div className="container flex h-14 items-center justify-between gap-2 overflow-hidden">
         <Link href="/" className="flex items-center space-x-2 group">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-black shadow-[0_0_16px_rgba(20,241,149,0.25)] group-hover:scale-110 transition-transform">
@@ -118,13 +122,32 @@ export function Navbar() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 px-3 rounded-lg hover:bg-white/5 text-[10px] font-black uppercase tracking-widest">
+              <Button variant="ghost" className="hidden h-8 rounded-lg px-3 text-[10px] font-black uppercase tracking-widest hover:bg-white/5 sm:inline-flex">
                 <Languages className="mr-2 h-3.5 w-3.5" />
                 <span>Language</span>
                 <span className="ml-1 text-muted-foreground">({locale.toUpperCase()})</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40 bg-background/95 backdrop-blur-xl border-white/10 rounded-2xl">
+              <DropdownMenuItem onClick={() => handleLocaleChange('en')} className={cn('rounded-xl font-bold uppercase text-[10px] tracking-widest mt-1', locale === 'en' && 'bg-primary/10 text-primary')}>
+                English
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleLocaleChange('pt')} className={cn('rounded-xl font-bold uppercase text-[10px] tracking-widest mt-1', locale === 'pt' && 'bg-primary/10 text-primary')}>
+                Portugues
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleLocaleChange('es')} className={cn('rounded-xl font-bold uppercase text-[10px] tracking-widest mb-1 mt-1', locale === 'es' && 'bg-primary/10 text-primary')}>
+                Espanol
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-white/5 sm:hidden">
+                <Languages className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40 bg-background/95 backdrop-blur-xl border-white/10 rounded-2xl">
@@ -184,6 +207,12 @@ export function Navbar() {
                   <Link href="/certificates" className="flex items-center">
                     <Award className="mr-3 h-4 w-4" />
                     {t('certificates')}
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild className="rounded-xl font-bold uppercase text-[10px] tracking-widest p-3 mt-1 cursor-pointer">
+                  <Link href="/credentials" className="flex items-center">
+                    <ShieldCheck className="mr-3 h-4 w-4" />
+                    Credentials
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild className="rounded-xl font-bold uppercase text-[10px] tracking-widest p-3 mt-1 cursor-pointer">
